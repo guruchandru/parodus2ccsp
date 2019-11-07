@@ -60,6 +60,7 @@ char *g_systemReadyTime=NULL;
 
 pthread_mutex_t mut=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t con=PTHREAD_COND_INITIALIZER;
+pthread_mutex_t device_mac_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 const char * notifyparameters[]={
 "Device.NotifyComponent.X_RDKCENTRAL-COM_Connected-Client",
@@ -107,6 +108,8 @@ const char * notifyparameters[]={
 "Device.DeviceInfo.X_RDKCENTRAL-COM_CloudUIEnable",
 "Device.DeviceInfo.X_RDKCENTRAL-COM_AkerEnable",
 "Device.MoCA.Interface.1.Enable",
+"Device.NotifyComponent.X_RDKCENTRAL-COM_PresenceNotification",
+"Device.WiFi.X_CISCO_COM_FactoryResetRadioAndAp",
 /* Always keep AdvancedSecurity parameters as the last parameters in notify list as these have to be removed if cujo/fp is not enabled. */
 "Device.DeviceInfo.X_RDKCENTRAL-COM_AdvancedSecurity.SafeBrowsing.Enable",
 "Device.DeviceInfo.X_RDKCENTRAL-COM_AdvancedSecurity.Softflowd.Enable"
@@ -115,7 +118,6 @@ const char * notifyparameters[]={
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
 void loadCfgFile();
-static void getDeviceMac();
 static int writeToJson(char *data);
 static PARAMVAL_CHANGE_SOURCE mapWriteID(unsigned int writeID);
 static void *notifyTask(void *status);
@@ -670,7 +672,14 @@ static void *notifyTask(void *status)
 	return NULL;
 }
 
-static void getDeviceMac()
+#ifdef FEATURE_SUPPORT_WEBCONFIG
+char* get_global_deviceMAC()
+{
+    return deviceMAC;
+}
+#endif
+
+void getDeviceMac()
 {
     char *macID = NULL;
     char deviceMACValue[32] = { '\0' };
@@ -682,6 +691,7 @@ static void getDeviceMac()
     {
         do
         {
+	    pthread_mutex_lock(&device_mac_mutex);
             backoffRetryTime = (int) pow(2, c) -1;
 #ifdef RDKB_BUILD
             token_t  token;
@@ -706,11 +716,17 @@ static void getDeviceMac()
             if(strlen(deviceMAC) == 0)
             {
                 WalError("Failed to GetValue for MAC. Retrying...\n");
+		pthread_mutex_unlock(&device_mac_mutex);
                 WalInfo("backoffRetryTime %d seconds\n", backoffRetryTime);
                 sleep(backoffRetryTime);
                 c++;
                 retryCount++;
             }
+	    else
+	    {
+		pthread_mutex_unlock(&device_mac_mutex);
+		break;
+	    }
         }while((retryCount >= 1) && (retryCount <= 5));
     }
 }
@@ -992,6 +1008,7 @@ void processNotification(NotifyData *notifyData)
 	        		}
 	        		cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
+				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
 	        	}
 	        		break;
 
@@ -1011,7 +1028,7 @@ void processNotification(NotifyData *notifyData)
 	        		WalPrint("Framing notifyPayload for Factory reset\n");
 	        		cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
-					cJSON_AddStringToObject(notifyPayload, "reboot_reason", reboot_reason);
+				cJSON_AddStringToObject(notifyPayload, "reboot_reason", (NULL != reboot_reason) ? reboot_reason : "NULL");
 	        	}
 	        		break;
 
@@ -1031,6 +1048,7 @@ void processNotification(NotifyData *notifyData)
 	        			WalPrint("Framing notifyPayload for Firmware upgrade\n");
 	        			cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 	        			cJSON_AddStringToObject(notifyPayload, "cid", cid);
+					OnboardLog("FIRMWARE_UPGRADE/%d/%s\n",cmc,cid);
 	        		}
 	        			break;
 
@@ -1081,6 +1099,7 @@ void processNotification(NotifyData *notifyData)
 	        			free(dest);
 	        			return;
 	        		}
+				OnboardLog("%s/%s\n",dest,notifyData->u.status->transId);
 	        	}
 	        		break;
 
@@ -1091,6 +1110,7 @@ void processNotification(NotifyData *notifyData)
                                 {
                                         reason = (char *)malloc(sizeof(char)*MAX_REASON_LENGTH);
 				        mapComponentStatusToGetReason(notifyData->u.device->status, reason);
+				                        OnboardLog("%s\n",reason);
                                         snprintf(dest, WEBPA_NOTIFY_EVENT_MAX_LENGTH, "event:device-status/%s/non-operational/%s/%s", device_id,(NULL != strBootTime)?strBootTime:"unknown",reason);
                                         cJSON_AddStringToObject(notifyPayload, "status", "non-operational");
                                         cJSON_AddStringToObject(notifyPayload, "reason", reason);
@@ -1107,6 +1127,7 @@ void processNotification(NotifyData *notifyData)
 				{
 					WAL_FREE(strBootTime);
 				}
+				OnboardLog("%s\n",dest);
 			}
 	        		break;
 
@@ -1261,6 +1282,7 @@ static WDMP_STATUS processFactoryResetNotification(ParamNotify *paramNotify, uns
 					else
 					{
 						WalError("Error setting CMC value for factory reset\n");
+						OnboardLog("Error setting CMC value for factory reset\n");
 					}
 				}
 				else
@@ -1338,6 +1360,7 @@ static WDMP_STATUS processFirmwareUpgradeNotification(ParamNotify *paramNotify, 
 		{
 			WAL_FREE(dbCID);
 			WalError("Error setting CMC value for firmware upgrade\n");
+			OnboardLog("Error setting CMC value for firmware upgrade\n");
 		}
 	}
 	else

@@ -16,6 +16,7 @@
 #include "ansc_platform.h"
 #include "ccsp_base_api.h"
 #include "webconfig_log.h"
+#include "cosa_webconfig_apis.h"
 
 /*----------------------------------------------------------------------------*/
 /*                                   Macros                                   */
@@ -32,7 +33,7 @@
 #define WEBPA_READ_HEADER             "/etc/parodus/parodus_read_file.sh"
 #define WEBPA_CREATE_HEADER           "/etc/parodus/parodus_create_file.sh"
 #define BACKOFF_SLEEP_DELAY_SEC 	    10
-
+#define ETAG_HEADER 		    "ETag:"
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
 /*----------------------------------------------------------------------------*/
@@ -47,43 +48,51 @@ typedef struct _notify_params
 	long status_code;
 	char * application_status;
 	int application_details;
-	char * previous_sync_time;
+	char * request_timestamp;
 	char * version;
+	char * transaction_uuid;
 } notify_params_t;
 /*----------------------------------------------------------------------------*/
 /*                            File Scoped Variables                           */
 /*----------------------------------------------------------------------------*/
-static char deviceMAC[32]={'\0'};
 static char g_systemReadyTime[64]={'\0'};
 static char g_interface[32]={'\0'};
-char serialNum[64]={'\0'};
+static char serialNum[64]={'\0'};
+static char g_FirmwareVersion[64]={'\0'};
+static char g_bootTime[64]={'\0'};
 char webpa_auth_token[4096]={'\0'};
-pthread_mutex_t device_mac_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char g_ETAG[64]={'\0'};
 pthread_mutex_t periodicsync_mutex=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t periodicsync_condition=PTHREAD_COND_INITIALIZER;
+pthread_mutex_t notify_mut=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t notify_con=PTHREAD_COND_INITIALIZER;
 static pthread_t NotificationThreadId=0;
+notify_params_t *notifyMsg = NULL;
 /*----------------------------------------------------------------------------*/
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
 static void *WebConfigTask(void *status);
-int processJsonDocument(char *jsonData, WDMP_STATUS *retStatus, char **docVersion);
+int processJsonDocument(char *jsonData, int *retStatus, char **docVersion);
 int validateConfigFormat(cJSON *json, char **eTag);
-int requestWebConfigData(char **configData, int r_count, int index, int status, long *code);
+int requestWebConfigData(char **configData, int r_count, int index, int status, long *code,char **transaction_id);
 static void get_webCfg_interface(char **interface);
-void createCurlheader(struct curl_slist *list, struct curl_slist **header_list, int status, int index);
+void createCurlheader(struct curl_slist *list, struct curl_slist **header_list, int status, int index, char ** trans_uuid);
 int parseJsonData(char* jsonData, req_struct **req_obj, char **version);
 size_t write_callback_fn(void *buffer, size_t size, size_t nmemb, struct token_data *data);
 void getAuthToken();
 void createNewAuthToken(char *newToken, size_t len, char *hw_mac, char* hw_serial_number);
-int handleHttpResponse(long response_code, char *webConfigData, int retry_count, int index );
+int handleHttpResponse(long response_code, char *webConfigData, int retry_count, int index,char* transaction_uuid);
 static char* generate_trans_uuid();
-static void getDeviceMac();
 static void macToLowerCase(char macValue[]);
 static void loadInitURLFromFile(char **url);
-void* processWebConfigNotification(void* pValue);
-void Send_Notification_Task(char *url, long status_code, char *application_status, int application_details, char *previous_sync_time, char *version);
+void* processWebConfigNotification();
+void addWebConfigNotifyMsg(char *url, long status_code, char *application_status, int application_details, char *request_timestamp, char *version, char *transaction_uuid);
 void free_notify_params_struct(notify_params_t *param);
 char *replaceMacWord(const char *s, const char *macW, const char *deviceMACW);
+void processWebconfigSync(int index, int status);
+static void initWebConfigNotifyTask();
+size_t header_callback(char *buffer, size_t size, size_t nitems);
+void stripSpaces(char *str, char **final_str);
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
@@ -117,71 +126,57 @@ void initWebConfigTask(int status)
 static void *WebConfigTask(void *status)
 {
 	pthread_detach(pthread_self());
-	int configRet = -1;
-	char *webConfigData = NULL;
-	int r_count=0;
-	long res_code;
 	int index=0, i=0;
 	int ret = 0;
 	int json_status=-1;
-	int retry_count=0, rv=0, rc=0;
+	int rv=0, rc=0;
         struct timeval tp;
         struct timespec ts;
         time_t t;
 	int count=0;
 	int wait_flag=0;
+	int forced_sync=0, syncIndex = 0;
         int value =Get_PeriodicSyncCheckInterval();
 
-	count = getConfigNumberOfEntries();
-	WebConfigLog("count returned from getConfigNumberOfEntries:%d\n", count);
+	//start webconfig notification thread.
+	initWebConfigNotifyTask();
 
-       while(1)
-      {
-	if(!wait_flag)
+	while(1)
 	{
-        for(i = 0; i < count; i++)
-        {
-		index = getInstanceNumberAtIndex(i);
-		WebConfigLog("index returned from getInstanceNumberAtIndex:%d\n", index);
-		if(index != 0)
+		if(forced_sync)
 		{
-			while(1)
+			//trigger sync only for particular index
+			WebConfigLog("Trigger Forced sync for index %d\n", syncIndex);
+			processWebconfigSync(syncIndex, (int)status);
+			WebConfigLog("reset forced_sync and syncIndex after sync\n");
+			forced_sync = 0;
+			syncIndex = 0;
+			WebConfigLog("reset ForceSyncCheck after sync\n");
+			setForceSyncCheck(index, false, "", 0);
+		}
+		else if(!wait_flag)
+		{
+			//iterate through all entries in Device.X_RDK_WebConfig.ConfigFile.[i].URL to check if the current stored version of each configuration document matches the latest version on the cloud.
+
+			count = getConfigNumberOfEntries();
+			WebConfigLog("count returned from getConfigNumberOfEntries:%d\n", count);
+
+			for(i = 0; i < count; i++)
 			{
-				//iterate through all entries in Device.X_RDK_WebConfig.ConfigFile.[i].URL to check if the current stored version of each configuration document matches the latest version on the cloud. 
-				if(retry_count >3)
+				index = getInstanceNumberAtIndex(i);
+				WebConfigLog("index returned from getInstanceNumberAtIndex:%d\n", index);
+				if(index != 0)
 				{
-					WebConfigLog("retry_count has reached max limit. Exiting.\n");
-					retry_count=0;
-					break;
+					processWebconfigSync(index, (int)status);
 				}
-				configRet = requestWebConfigData(&webConfigData, r_count, index,(int)status, &res_code);
-				if(configRet == 0)
-				{
-					rv = handleHttpResponse(res_code, webConfigData, retry_count, index);
-					if(rv ==1)
-					{
-						WebcfgDebug("No retries are required. Exiting..\n");
-						break;
-					}
-				}
-				else
-				{
-					WebConfigLog("Failed to get webConfigData from cloud\n");
-				}
-				WebConfigLog("requestWebConfigData BACKOFF_SLEEP_DELAY_SEC is %d seconds\n", BACKOFF_SLEEP_DELAY_SEC);
-				sleep(BACKOFF_SLEEP_DELAY_SEC);
-				retry_count++;
-				WebcfgDebug("Webconfig retry_count is %d\n", retry_count);
 			}
 		}
-        }
-      }
 
-                 pthread_mutex_lock (&periodicsync_mutex);
-                gettimeofday(&tp, NULL);
-                ts.tv_sec = tp.tv_sec;
-                ts.tv_nsec = tp.tv_usec * 1000;
-                ts.tv_sec += value;
+		pthread_mutex_lock (&periodicsync_mutex);
+		gettimeofday(&tp, NULL);
+		ts.tv_sec = tp.tv_sec;
+		ts.tv_nsec = tp.tv_usec * 1000;
+		ts.tv_sec += value;
 
 		if (g_shutdown)
 		{
@@ -189,41 +184,76 @@ static void *WebConfigTask(void *status)
 			pthread_mutex_unlock (&periodicsync_mutex);
 			break;
 		}
-
-                rv = pthread_cond_timedwait(&periodicsync_condition, &periodicsync_mutex, &ts);
 		value=Get_PeriodicSyncCheckInterval();
-                if(!rv && !g_shutdown)
+		WebConfigLog("PeriodicSyncCheckInterval value is %d\n",value);
+		if(value == 0)
 		{
-                        time(&t);
+			WebcfgDebug("B4 periodicsync_condition pthread_cond_wait\n");
+			pthread_cond_wait(&periodicsync_condition, &periodicsync_mutex);
+			rv =0;
+		}
+		else
+		{
+			WebcfgDebug("B4 periodicsync_condition pthread_cond_timedwait\n");
+			rv = pthread_cond_timedwait(&periodicsync_condition, &periodicsync_mutex, &ts);
+		}
+
+		if(!rv && !g_shutdown)
+		{
+			time(&t);
 			BOOL ForceSyncEnable;
-			getForceSyncCheck(1,&ForceSyncEnable); //TODO: Iterate through all indexes and check which index needs ForceSync
-                        if(ForceSyncEnable)
-                        {
-                                wait_flag=0;
-                                WebConfigLog("Recieved signal interput to getForceSyncCheck at %s\n",ctime(&t));
-                                setForceSyncCheck(1,false);
-                        }
-                        else
-                        {
-                                wait_flag=1;
-                                WebConfigLog("Recieved signal interput to change the sync interval to %d\n",value);
-                        }
-                }
-                else if (rv == ETIMEDOUT && !g_shutdown)
-                {
-                        time(&t);
+			char* ForceSyncTransID = NULL;
+
+			// Iterate through all indexes to check which index needs ForceSync
+			count = getConfigNumberOfEntries();
+			WebConfigLog("count returned is:%d\n", count);
+
+			for(i = 0; i < count; i++)
+			{
+				WebcfgDebug("B4 getInstanceNumberAtIndex for i %d\n", i);
+				index = getInstanceNumberAtIndex(i);
+				WebcfgDebug("getForceSyncCheck for index %d\n", index);
+				getForceSyncCheck(index,&ForceSyncEnable, &ForceSyncTransID);
+				WebcfgDebug("ForceSyncEnable is %d\n", ForceSyncEnable);
+				if(ForceSyncTransID !=NULL)
+				{
+					if(ForceSyncEnable)
+					{
+						wait_flag=0;
+						forced_sync = 1;
+						syncIndex = index;
+						WebConfigLog("Received signal interrupt to getForceSyncCheck at %s\n",ctime(&t));
+						WAL_FREE(ForceSyncTransID);
+						break;
+					}
+					WebConfigLog("ForceSyncEnable is false\n");
+					WAL_FREE(ForceSyncTransID);
+					WebConfigLog("free ForceSyncTransID done\n");
+				}
+			}
+			WebConfigLog("forced_sync is %d\n", forced_sync);
+			if(!forced_sync)
+			{
+				wait_flag=1;
+				value=Get_PeriodicSyncCheckInterval();
+				WebConfigLog("Received signal interrupt to change the sync interval to %d\n",value);
+			}
+		}
+		else if (rv == ETIMEDOUT && !g_shutdown)
+		{
+			time(&t);
 			wait_flag=0;
-                        WebConfigLog("Periodic Sync Interval %d sec and syncing at %s\n",value,ctime(&t));
-                }
+			WebConfigLog("Periodic Sync Interval %d sec and syncing at %s\n",value,ctime(&t));
+		}
 		else if(g_shutdown)
 		{
-			WebConfigLog("Received signal interupt to RFC disable. g_shutdown is %d, proceeding to kill webconfig thread\n", g_shutdown);
+			WebConfigLog("Received signal interrupt to RFC disable. g_shutdown is %d, proceeding to kill webconfig thread\n", g_shutdown);
 			pthread_mutex_unlock (&periodicsync_mutex);
 			break;
 		}
-			pthread_mutex_unlock(&periodicsync_mutex);
+		pthread_mutex_unlock(&periodicsync_mutex);
 
-     }
+	}
 	if(NotificationThreadId)
 	{
 		ret = pthread_join (NotificationThreadId, NULL);
@@ -242,21 +272,106 @@ static void *WebConfigTask(void *status)
 	return NULL;
 }
 
-int handleHttpResponse(long response_code, char *webConfigData, int retry_count, int index)
+void processWebconfigSync(int index, int status)
+{
+	int retry_count=0;
+	int r_count=0;
+	int configRet = -1;
+	char *webConfigData = NULL;
+	long res_code;
+	int rv=0;
+	char *transaction_uuid =NULL;
+
+	WebcfgDebug("========= Start of processWebconfigSync =============\n");
+	while(1)
+	{
+		if(retry_count >3)
+		{
+			WebConfigLog("retry_count has reached max limit. Exiting.\n");
+			retry_count=0;
+			break;
+		}
+		configRet = requestWebConfigData(&webConfigData, r_count, index, status, &res_code, &transaction_uuid);
+		if(configRet == 0)
+		{
+			rv = handleHttpResponse(res_code, webConfigData, retry_count, index, transaction_uuid);
+			if(rv ==1)
+			{
+				WebConfigLog("No retries are required. Exiting..\n");
+				break;
+			}
+		}
+		else
+		{
+			WebConfigLog("Failed to get webConfigData from cloud\n");
+		}
+		WebConfigLog("requestWebConfigData BACKOFF_SLEEP_DELAY_SEC is %d seconds\n", BACKOFF_SLEEP_DELAY_SEC);
+		sleep(BACKOFF_SLEEP_DELAY_SEC);
+		retry_count++;
+		WebConfigLog("Webconfig retry_count is %d\n", retry_count);
+	}
+	WebcfgDebug("========= End of processWebconfigSync =============\n");
+	return;
+}
+
+int handleHttpResponse(long response_code, char *webConfigData, int retry_count, int index, char* transaction_uuid)
 {
 	int first_digit=0;
 	int json_status=0;
-	WDMP_STATUS setRet = WDMP_FAILURE;
+	int setRet = 0;
 	int ret=0, getRet = 0;
 	char *configURL = NULL;
-	char *version = NULL;
-	char *PreviousSyncDateTime=NULL;
+	char *configVersion = NULL;
+	char *RequestTimeStamp=NULL;
 	char *newDocVersion = NULL;
+	int err = 0;
+
+        //get common items for all status codes and send notification.
+        getRet = getConfigURL(index, &configURL);
+	if(getRet)
+	{
+		WebcfgDebug("configURL for index %d is %s\n", index, configURL);
+	}
+	else
+	{
+		WebConfigLog("getConfigURL failed for index %d\n", index);
+	}
+
+	getRet = getConfigVersion(index, &configVersion);
+	if(getRet)
+	{
+		WebConfigLog("configVersion for index %d is %s\n", index, configVersion);
+	}
+	else
+	{
+		WebConfigLog("getConfigVersion failed for index %d\n", index);
+	}
+
+        ret = setRequestTimeStamp(index);
+	if(ret == 0)
+	{
+		WebcfgDebug("RequestTimeStamp set successfully for index %d\n", index);
+	}
+	else
+	{
+		WebConfigLog("Failed to set RequestTimeStamp for index %d\n", index);
+	}
+
+        getRet = getRequestTimeStamp(index, &RequestTimeStamp);
+	if(getRet)
+	{
+		WebcfgDebug("RequestTimeStamp for index %d is %s\n", index, RequestTimeStamp);
+	}
+	else
+	{
+		WebConfigLog("RequestTimeStamp get failed for index %d\n", index);
+	}
 
 	if(response_code == 304)
 	{
-		WebConfigLog("webConfig is in sync with cloud. response_code:%d\n", response_code); //do sync check OK
+		WebConfigLog("webConfig is in sync with cloud. response_code:%d\n", response_code);
 		setSyncCheckOK(index, TRUE);
+		addWebConfigNotifyMsg(configURL, response_code, NULL, 0, RequestTimeStamp , configVersion, transaction_uuid);
 		return 1;
 	}
 	else if(response_code == 200)
@@ -268,31 +383,8 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 			WebcfgDebug("webConfigData fetched successfully\n");
 			json_status = processJsonDocument(webConfigData, &setRet, &newDocVersion);
 			WebConfigLog("setRet after process Json is %d\n", setRet);
-			WebConfigLog("newDocVersion is %s\n", newDocVersion);
+			WebcfgDebug("newDocVersion is %s\n", newDocVersion);
 
-			//get common items for success and failure cases to send notification.
-
-			getRet = getConfigURL(index, &configURL);
-			if(getRet)
-			{
-				WebcfgDebug("After processJsonDocument: configURL is %s\n", configURL);
-			}
-			else
-			{
-				WebConfigLog("getConfigURL failed\n");
-			}
-
-			ret = setPreviousSyncDateTime(index);
-			WebcfgDebug("setPreviousSyncDateTime ret is %d\n", ret);
-			if(ret == 0)
-			{
-				WebcfgDebug("PreviousSyncDateTime set successfully for index %d\n", index);
-			}
-			else
-			{
-				WebConfigLog("Failed to set PreviousSyncDateTime for index %d\n", index);
-			}
-	
 			if(json_status == 1)
 			{
 				WebcfgDebug("processJsonDocument success\n");
@@ -303,7 +395,6 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 
 				WebcfgDebug("set version and syncCheckOK for success\n");
 				ret = setConfigVersion(index, newDocVersion);//get new version from json
-				WebcfgDebug("setConfigVersion ret is %d\n", ret);
 				if(ret == 0)
 				{
 					WebcfgDebug("Config Version %s set successfully for index %d\n", newDocVersion, index);
@@ -314,7 +405,6 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 				}
 
 				ret = setSyncCheckOK(index, TRUE );
-				WebcfgDebug("setSyncCheckOK ret is %d\n", ret);
 				if(ret == 0)
 				{
 					WebcfgDebug("SyncCheckOK set successfully for index %d\n", index);
@@ -324,27 +414,13 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 					WebConfigLog("Failed to set SyncCheckOK for index %d\n", index);
 				}
 
-				getRet = getPreviousSyncDateTime(index, &PreviousSyncDateTime);
-				WebcfgDebug("getPreviousSyncDateTime getRet is %d\n", getRet);
-				if(getRet)
-				{
-					WebConfigLog("After processJsonDocument: PreviousSyncDateTime is %s for index %d\n", PreviousSyncDateTime, index);
-				}
-				else
-				{
-					WebConfigLog("PreviousSyncDateTime get failed for index %d\n", index);
-				}
-
-				WebcfgDebug("B4 Send_Notification_Task success case\n");
-				Send_Notification_Task(configURL, response_code, "success", setRet, PreviousSyncDateTime , newDocVersion);
-				WebcfgDebug("After Send_Notification_Task for success case\n");
+				addWebConfigNotifyMsg(configURL, response_code, "success", setRet, RequestTimeStamp , newDocVersion, transaction_uuid);
 				return 1;
 			}
 			else
 			{
 				WebConfigLog("Failure in processJsonDocument\n");
 				ret = setSyncCheckOK(index, FALSE);
-				WebcfgDebug("setSyncCheckOK ret is %d\n", ret);
 				if(ret == 0)
 				{
 					WebcfgDebug("SyncCheckOK set to FALSE for index %d\n", index);
@@ -354,24 +430,10 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 					WebConfigLog("Failed to set SyncCheckOK to FALSE for index %d\n", index);
 				}
 
-				if(retry_count == 3)
-				{
-					WebcfgDebug("retry_count is %d\n", retry_count);
-					getRet = getPreviousSyncDateTime(index, &PreviousSyncDateTime);
-					WebcfgDebug("getPreviousSyncDateTime getRet is %d\n", getRet);
-					if(getRet)
-					{
-						WebConfigLog("After processJsonDocument failure: PreviousSyncDateTime is %s for index %d\n", PreviousSyncDateTime, index);
-					}
-					else
-					{
-						WebConfigLog("PreviousSyncDateTime get failed for index %d\n", index);
-					}
-					WebConfigLog("Configuration settings from %s version %s FAILED\n", configURL, newDocVersion );
-					WebConfigLog("Sending Failure Notification after 3 retry attempts\n");
-					Send_Notification_Task(configURL, response_code, "failed", setRet, PreviousSyncDateTime , newDocVersion);
-					WebcfgDebug("After Send_Notification_Task failure case\n");
-				}
+				WebConfigLog("Configuration settings from %s version %s FAILED\n", configURL, newDocVersion );
+				WebConfigLog("Sending Webconfig apply Failure Notification\n");
+				addWebConfigNotifyMsg(configURL, response_code, "failed", setRet, RequestTimeStamp , newDocVersion, transaction_uuid);
+				return 1;
 			}
 		}
 		else
@@ -382,28 +444,45 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 	else if(response_code == 204)
 	{
 		WebConfigLog("No configuration available for this device. response_code:%d\n", response_code);
+		addWebConfigNotifyMsg(configURL, response_code, NULL, 0, RequestTimeStamp , configVersion, transaction_uuid);
 		return 1;
 	}
 	else if(response_code == 403)
 	{
 		WebConfigLog("Token is expired, fetch new token. response_code:%d\n", response_code);
-		createNewAuthToken(webpa_auth_token, sizeof(webpa_auth_token), deviceMAC, serialNum );
+		createNewAuthToken(webpa_auth_token, sizeof(webpa_auth_token), get_global_deviceMAC(), serialNum );
 		WebcfgDebug("createNewAuthToken done in 403 case\n");
+		err = 1;
 	}
 	else if(response_code == 429)
 	{
 		WebConfigLog("No action required from client. response_code:%d\n", response_code);
+		WAL_FREE(configURL);
+		WAL_FREE(configVersion);
+		WAL_FREE(RequestTimeStamp);
+		WAL_FREE(transaction_uuid);
 		return 1;
 	}
 	first_digit = (int)(response_code / pow(10, (int)log10(response_code)));
 	if((response_code !=403) && (first_digit == 4)) //4xx
 	{
 		WebConfigLog("Action not supported. response_code:%d\n", response_code);
+		addWebConfigNotifyMsg(configURL, response_code, NULL, 0, RequestTimeStamp , configVersion, transaction_uuid);
 		return 1;
 	}
 	else //5xx & all other errors
 	{
 		WebConfigLog("Error code returned, need to retry. response_code:%d\n", response_code);
+		if(retry_count == 3 && !err)
+		{
+			WebcfgDebug("Sending Notification after 3 retry attempts\n");
+			addWebConfigNotifyMsg(configURL, response_code, NULL, 0, RequestTimeStamp , configVersion, transaction_uuid);
+			return 0;
+		}
+		WAL_FREE(configURL);
+		WAL_FREE(configVersion);
+		WAL_FREE(RequestTimeStamp);
+		WAL_FREE(transaction_uuid);
 	}
 }
 
@@ -415,7 +494,7 @@ int handleHttpResponse(long response_code, char *webConfigData, int retry_count,
 * @param[in] r_count Number of curl retries on ipv4 and ipv6 mode during failure
 * @return returns 0 if success, otherwise failed to fetch auth token and will be retried.
 */
-int requestWebConfigData(char **configData, int r_count, int index, int status, long *code)
+int requestWebConfigData(char **configData, int r_count, int index, int status, long *code, char **transaction_id)
 {
 	CURL *curl;
 	CURLcode res;
@@ -431,6 +510,7 @@ int requestWebConfigData(char **configData, int r_count, int index, int status, 
 	char *ct = NULL;
 	char *URL_param = NULL;
 	char *webConfigURL= NULL;
+	char *transID = NULL;
 	DATA_TYPE paramType;
 	int content_res=0;
 	struct token_data data;
@@ -451,20 +531,22 @@ int requestWebConfigData(char **configData, int r_count, int index, int status, 
 			return rv;
 		}
 		data.data[0] = '\0';
-		createCurlheader(list, &headers_list, status, index);
-		
+		createCurlheader(list, &headers_list, status, index, &transID);
+		if(transID !=NULL)
+		{
+			*transaction_id = strdup(transID);
+			WAL_FREE(transID);
+		}
 		getConfigURL(index, &configURL);
 		WebConfigLog("configURL fetched is %s\n", configURL);
 
 		if(configURL !=NULL)
 		{
-			WebcfgDebug("forming webConfigURL\n");
 			//Replace {mac} string from default init url with actual deviceMAC
-			webConfigURL = replaceMacWord(configURL, c, deviceMAC);
+			webConfigURL = replaceMacWord(configURL, c, get_global_deviceMAC());
 			WebConfigLog("webConfigURL is %s\n", webConfigURL);
 			// Store {mac} replaced/updated config URL to DB
 			setConfigURL(index, webConfigURL);
-			WebcfgDebug("setConfigURL done\n");
 			curl_easy_setopt(curl, CURLOPT_URL, webConfigURL );
 		}
 		else
@@ -495,6 +577,9 @@ int requestWebConfigData(char **configData, int r_count, int index, int status, 
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
 
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_list);
+
+		WebcfgDebug("Set CURLOPT_HEADERFUNCTION option\n");
+		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
 
 		// setting curl resolve option as default mode.
 		//If any failure, retry with v4 first and then v6 mode. 
@@ -601,7 +686,63 @@ size_t write_callback_fn(void *buffer, size_t size, size_t nmemb, struct token_d
     return size * nmemb;
 }
 
-int processJsonDocument(char *jsonData, WDMP_STATUS *retStatus, char **docVersion)
+/* @brief callback function to extract response header data.
+*/
+size_t header_callback(char *buffer, size_t size, size_t nitems)
+{
+	size_t etag_len = 0;
+	char* header_value = NULL;
+	char* final_header = NULL;
+	char header_str[64] = {'\0'};
+	int i=0, j=0;
+
+	etag_len = strlen(ETAG_HEADER);
+	if( nitems > etag_len )
+	{
+		if( strncasecmp(ETAG_HEADER, buffer, etag_len) == 0 )
+		{
+			header_value = strtok(buffer, ":");
+			while( header_value != NULL )
+			{
+				header_value = strtok(NULL, ":");
+				if(header_value !=NULL)
+				{
+					strncpy(header_str, header_value, sizeof(header_str));
+					WebcfgDebug("header_str is %s\n", header_str);
+					stripSpaces(header_str, &final_header);
+
+					WebcfgDebug("final_header is %s len %lu\n", final_header, strlen(final_header));
+					strncpy(g_ETAG, final_header, sizeof(g_ETAG));
+				}
+			}
+		}
+	}
+	return nitems;
+}
+
+//To strip all spaces , new line & carriage return characters from header output
+void stripSpaces(char *str, char **final_str)
+{
+	int i=0, j=0;
+
+	for(i=0;str[i]!='\0';++i)
+	{
+		if(str[i]!=' ')
+		{
+			if(str[i]!='\n')
+			{
+				if(str[i]!='\r')
+				{
+					str[j++]=str[i];
+				}
+			}
+		}
+	}
+	str[j]='\0';
+	*final_str = str;
+}
+
+int processJsonDocument(char *jsonData, int *retStatus, char **docVersion)
 {
 	cJSON *paramArray = NULL;
 	int parseStatus = 0;
@@ -610,20 +751,21 @@ int processJsonDocument(char *jsonData, WDMP_STATUS *retStatus, char **docVersio
 	int paramCount =0;
 	WDMP_STATUS valid_ret = WDMP_FAILURE;
 	WDMP_STATUS ret = WDMP_FAILURE;
+	int ccspStatus=0;
 	char *version = NULL;
+	int retry_count=0;
 
 	parseStatus = parseJsonData(jsonData, &reqObj, &version);
-	WebConfigLog("After parseJsonData version is %s\n", version);
+	WebcfgDebug("After parseJsonData version is %s\n", version);
 	if(version!=NULL)
 	{
-		WebcfgDebug("copying to docVersion\n");
 		*docVersion = strdup(version);
 		WebcfgDebug("docVersion is %s\n", *docVersion);
 		WAL_FREE(version);
 	}
 	if(parseStatus ==1)
 	{
-		WebcfgDebug("Request:> Type : %d\n",reqObj->reqType);
+		WebConfigLog("Request:> Type : %d\n",reqObj->reqType);
 		WebConfigLog("Request:> ParamCount = %zu\n",reqObj->u.setReq->paramCnt);
 		paramCount = (int)reqObj->u.setReq->paramCnt;
 		for (i = 0; i < paramCount; i++) 
@@ -637,19 +779,35 @@ int processJsonDocument(char *jsonData, WDMP_STATUS *retStatus, char **docVersio
 
 		if(valid_ret == WDMP_SUCCESS)
 		{
-			setValues(reqObj->u.setReq->param, paramCount, WEBPA_SET, NULL, NULL, &ret);
-			WebcfgDebug("Assigning retStatus\n");
-			*retStatus = ret;
-			WebcfgDebug("*retStatus is %d\n", *retStatus);
-                        if(ret == WDMP_SUCCESS)
-                        {
-                                WebConfigLog("setValues success. ret : %d\n", ret);
-                                rv= 1;
-                        }
-                        else
-                        {
-                              WebConfigLog("setValues Failed. ret : %d\n", ret);
-                        }
+			while(1)
+			{
+				if(retry_count >3)
+				{
+					WebConfigLog("Config apply retry_count has reached max limit\n");
+					retry_count=0;
+					break;
+				}
+
+				WebcfgInfo("WebConfig SET Request\n");
+				setValues(reqObj->u.setReq->param, paramCount, WEBPA_SET, NULL, NULL, &ret, &ccspStatus);
+				WebcfgInfo("Processed WebConfig SET Request\n");
+				*retStatus = ccspStatus;
+				WebcfgDebug("*retStatus is %d\n", *retStatus);
+		                if(ret == WDMP_SUCCESS)
+		                {
+		                        WebConfigLog("setValues success. ccspStatus : %d\n", ccspStatus);
+		                        rv= 1;
+					break;
+		                }
+		                else
+		                {
+		                      WebConfigLog("setValues Failed. ccspStatus : %d\n", ccspStatus);
+		                }
+				WebConfigLog("processJsonDocument BACKOFF_SLEEP_DELAY_SEC is %d seconds\n", BACKOFF_SLEEP_DELAY_SEC);
+				sleep(BACKOFF_SLEEP_DELAY_SEC);
+				retry_count++;
+				WebConfigLog("Config apply retry_count is %d\n", retry_count);
+			}
 		}
 		else
 		{
@@ -677,7 +835,7 @@ int parseJsonData(char* jsonData, req_struct **req_obj, char **version)
 	int paramCount=0;
 	WDMP_STATUS ret = WDMP_FAILURE, valid_ret = WDMP_FAILURE;
 	int itemSize=0;
-	char *ETAG= NULL;
+	char *configVersion= NULL;
 
 	if((jsonData !=NULL) && (strlen(jsonData)>0))
 	{
@@ -691,15 +849,15 @@ int parseJsonData(char* jsonData, req_struct **req_obj, char **version)
 		}
 		else
 		{
-			isValid = validateConfigFormat(json, &ETAG); //check eTAG value here :TODO
-			WebConfigLog("ETAG is %s\n", ETAG);
-			if(ETAG !=NULL)
+			isValid = validateConfigFormat(json, &configVersion);
+			WebConfigLog("configVersion is %s\n", configVersion);
+			if(configVersion !=NULL)
 			{
-				*version = strdup(ETAG);
-				WebcfgDebug("version copied from ETAG is %s\n", *version);
-				WAL_FREE(ETAG);
+				*version = strdup(configVersion);
+				WebcfgDebug("version copied from configVersion is %s\n", *version);
+				WAL_FREE(configVersion);
 			}
-			if(!isValid)// testing purpose. make it to !isValid
+			if(!isValid)
 			{
 				WebConfigLog("validateConfigFormat failed\n");
 				return rv;
@@ -731,48 +889,59 @@ int validateConfigFormat(cJSON *json, char **eTag)
 	cJSON *versionObj =NULL;
 	cJSON *paramArray = NULL;
 	int itemSize=0;
-	char *version=NULL;
+	char *jsonversion=NULL;
 
 	versionObj = cJSON_GetObjectItem( json, "version" );
 	if(versionObj !=NULL)
 	{
 		if(cJSON_GetObjectItem( json, "version" )->type == cJSON_String)
 		{
-			version = cJSON_GetObjectItem( json, "version" )->valuestring;
-			if(version !=NULL)
+			jsonversion = cJSON_GetObjectItem( json, "version" )->valuestring;
+			if(jsonversion !=NULL)
 			{
-				//version & eTag header validation is not done for phase 1 (Assuming both are matching)
-				//if(strcmp(version, eTag) == 0) 
-				//{
-				WebcfgDebug("Copying version to eTag value\n"); //free eTag
-					*eTag = strdup(version);
-					WebcfgDebug("eTag is %s\n", *eTag);
-					//check parameters
-					paramArray = cJSON_GetObjectItem( json, "parameters" );
-					if( paramArray != NULL )
+				//version & eTag header validation
+				WebcfgDebug("g_ETAG is %s len:%lu\n", g_ETAG, strlen(g_ETAG));
+				if( g_ETAG !=NULL )
+				{
+					WebcfgDebug("jsonversion :%s len %lu\n", jsonversion, strlen(jsonversion));
+					if(strncmp(jsonversion, g_ETAG, strlen(g_ETAG)) == 0)
 					{
-						itemSize = cJSON_GetArraySize( json );
-						if(itemSize ==2)
+						WebConfigLog("Config Version and ETAG header are matching\n");
+						*eTag = strdup(jsonversion);
+						WebConfigLog("eTag is %s\n", *eTag);
+						//check parameters
+						paramArray = cJSON_GetObjectItem( json, "parameters" );
+						if( paramArray != NULL )
 						{
-							return 1;
+							itemSize = cJSON_GetArraySize( json );
+							if(itemSize ==2)
+							{
+								WebConfigLog("Config document format is valid\n");
+								return 1;
+							}
+							else
+							{
+								WebConfigLog("config contains fields other than version and parameters\n");
+								return 0;
+							}
 						}
 						else
 						{
-							WebConfigLog("config contains fields other than version and parameters\n");
+							WebConfigLog("Invalid config json, parameters field is not present\n");
 							return 0;
 						}
 					}
 					else
 					{
-						WebConfigLog("Invalid config json, parameters field is not present\n");
+						WebConfigLog("Invalid config json, version & ETAG are not same\n");
 						return 0;
 					}
-				//}
-				//else
-				//{
-				//	WebConfigLog("Invalid config json, version and ETAG are not same\n");
-				//	return 0;
-				//}
+				}
+				else
+				{
+					WebConfigLog("Failed to fetch ETAG header from config response\n");
+					return 0;
+				}
 			}
 		}
 	}
@@ -830,7 +999,7 @@ static void get_webCfg_interface(char **interface)
  * @param[in] device status value
  * @param[out] header_list output curl header list
 */
-void createCurlheader( struct curl_slist *list, struct curl_slist **header_list, int status, int index)
+void createCurlheader( struct curl_slist *list, struct curl_slist **header_list, int status, int index, char ** trans_uuid)
 {
 	char *version_header = NULL;
 	char *auth_header = NULL;
@@ -845,28 +1014,25 @@ void createCurlheader( struct curl_slist *list, struct curl_slist **header_list,
 	char *uuid_header = NULL;
 	char *transaction_uuid = NULL;
 	char *version = NULL;
+	char* syncTransID = NULL;
+	BOOL ForceSyncEnable;
 
 	WebConfigLog("Start of createCurlheader\n");
 	//Fetch auth JWT token from cloud.
 	getAuthToken();
-	WebcfgDebug("After getAuthToken\n");
 	
 	auth_header = (char *) malloc(sizeof(char)*MAX_HEADER_LEN);
 	if(auth_header !=NULL)
 	{
-		WebcfgDebug("forming auth_header\n");
 		snprintf(auth_header, MAX_HEADER_LEN, "Authorization:Bearer %s", (0 < strlen(webpa_auth_token) ? webpa_auth_token : NULL));
 		list = curl_slist_append(list, auth_header);
 		WAL_FREE(auth_header);
 	}
-	WebcfgDebug("B4 version header\n");
 	version_header = (char *) malloc(sizeof(char)*MAX_BUF_SIZE);
 	if(version_header !=NULL)
 	{
-		WebcfgDebug("calling getConfigVersion\n");
 		getConfigVersion(index, &version);
-		WebcfgDebug("createCurlheader version fetched is %s\n", version);
-		snprintf(version_header, MAX_BUF_SIZE, "IF-NONE-MATCH:%s", ((NULL != version) ? version : "V1.0-NONE"));
+		snprintf(version_header, MAX_BUF_SIZE, "IF-NONE-MATCH:%s", ((NULL != version && (strlen(version)!=0)) ? version : "NONE"));
 		WebConfigLog("version_header formed %s\n", version_header);
 		list = curl_slist_append(list, version_header);
 		WAL_FREE(version_header);
@@ -880,36 +1046,55 @@ void createCurlheader( struct curl_slist *list, struct curl_slist **header_list,
 		list = curl_slist_append(list, schema_header);
 		WAL_FREE(schema_header);
 	}
-	bootTime = getParameterValue(DEVICE_BOOT_TIME);
-	if(bootTime !=NULL)
+
+	if(strlen(g_bootTime) ==0)
+	{
+		bootTime = getParameterValue(DEVICE_BOOT_TIME);
+		if(bootTime !=NULL)
+		{
+		       strncpy(g_bootTime, bootTime, sizeof(g_bootTime));
+		       WebcfgDebug("g_bootTime fetched is %s\n", g_bootTime);
+		       WAL_FREE(bootTime);
+		}
+	}
+
+	if(strlen(g_bootTime))
 	{
 		bootTime_header = (char *) malloc(sizeof(char)*MAX_BUF_SIZE);
 		if(bootTime_header !=NULL)
 		{
-			snprintf(bootTime_header, MAX_BUF_SIZE, "X-System-Boot-Time: %s", bootTime);
+			snprintf(bootTime_header, MAX_BUF_SIZE, "X-System-Boot-Time: %s", g_bootTime);
 			WebConfigLog("bootTime_header formed %s\n", bootTime_header);
 			list = curl_slist_append(list, bootTime_header);
 			WAL_FREE(bootTime_header);
 		}
-		WAL_FREE(bootTime);
 	}
 	else
 	{
 		WebConfigLog("Failed to get bootTime\n");
 	}
 
-	FwVersion = getParameterValue(FIRMWARE_VERSION);
-	if(FwVersion !=NULL)
+	if(strlen(g_FirmwareVersion) ==0)
+	{
+		FwVersion = getParameterValue(FIRMWARE_VERSION);
+		if(FwVersion !=NULL)
+		{
+		       strncpy(g_FirmwareVersion, FwVersion, sizeof(g_FirmwareVersion));
+		       WebcfgDebug("g_FirmwareVersion fetched is %s\n", g_FirmwareVersion);
+		       WAL_FREE(FwVersion);
+		}
+	}
+
+	if(strlen(g_FirmwareVersion))
 	{
 		FwVersion_header = (char *) malloc(sizeof(char)*MAX_BUF_SIZE);
 		if(FwVersion_header !=NULL)
 		{
-			snprintf(FwVersion_header, MAX_BUF_SIZE, "X-System-Firmware-Version: %s", FwVersion);
+			snprintf(FwVersion_header, MAX_BUF_SIZE, "X-System-Firmware-Version: %s", g_FirmwareVersion);
 			WebConfigLog("FwVersion_header formed %s\n", FwVersion_header);
 			list = curl_slist_append(list, FwVersion_header);
 			WAL_FREE(FwVersion_header);
 		}
-		WAL_FREE(FwVersion);
 	}
 	else
 	{
@@ -971,7 +1156,22 @@ void createCurlheader( struct curl_slist *list, struct curl_slist **header_list,
                 WebConfigLog("Failed to get systemReadyTime\n");
         }
 
-	transaction_uuid = generate_trans_uuid();
+	getForceSyncCheck(index,&ForceSyncEnable, &syncTransID);
+	if(syncTransID !=NULL)
+	{
+		if(ForceSyncEnable && strlen(syncTransID)>0)
+		{
+			WebConfigLog("updating transaction_uuid with force syncTransID\n");
+			transaction_uuid = strdup(syncTransID);
+		}
+		WAL_FREE(syncTransID);
+	}
+
+	if(transaction_uuid == NULL)
+	{
+		transaction_uuid = generate_trans_uuid();
+	}
+
 	if(transaction_uuid !=NULL)
 	{
 		uuid_header = (char *) malloc(sizeof(char)*MAX_BUF_SIZE);
@@ -980,6 +1180,7 @@ void createCurlheader( struct curl_slist *list, struct curl_slist **header_list,
 			snprintf(uuid_header, MAX_BUF_SIZE, "Transaction-ID: %s", transaction_uuid);
 			WebConfigLog("uuid_header formed %s\n", uuid_header);
 			list = curl_slist_append(list, uuid_header);
+			*trans_uuid = strdup(transaction_uuid);
 			WAL_FREE(transaction_uuid);
 			WAL_FREE(uuid_header);
 		}
@@ -989,7 +1190,6 @@ void createCurlheader( struct curl_slist *list, struct curl_slist **header_list,
 		WebConfigLog("Failed to generate transaction_uuid\n");
 	}
 	*header_list = list;
-	WebcfgDebug("End of createCurlheader\n");
 }
 
 static char* generate_trans_uuid()
@@ -1046,9 +1246,7 @@ void createNewAuthToken(char *newToken, size_t len, char *hw_mac, char* hw_seria
 	if (strlen(output)>0  && strcmp(output,"SUCCESS")==0)
 	{
 		//Call read script
-		WebcfgDebug("calling read script\n");
 		execute_token_script(newToken,WEBPA_READ_HEADER,len,hw_mac,hw_serial_number);
-		WebcfgDebug("after read script\n");
 	}
 	else
 	{
@@ -1071,21 +1269,24 @@ void getAuthToken()
 	if( strlen(WEBPA_READ_HEADER) !=0 && strlen(WEBPA_CREATE_HEADER) !=0)
 	{
                 getDeviceMac();
-                WebConfigLog("deviceMAC: %s\n",deviceMAC);
+                WebConfigLog("deviceMAC: %s\n",get_global_deviceMAC());
 
-		if( deviceMAC != NULL && strlen(deviceMAC) !=0 )
+		if( get_global_deviceMAC() != NULL && strlen(get_global_deviceMAC()) !=0 )
 		{
-			serial_number = getParameterValue(SERIAL_NUMBER);
-                        if(serial_number !=NULL)
-                        {
-			        strncpy(serialNum ,serial_number, sizeof(serialNum));
-			        WebConfigLog("serialNum: %s\n", serialNum);
-			        WAL_FREE(serial_number);
-                        }
+			if(strlen(serialNum) ==0)
+			{
+				serial_number = getParameterValue(SERIAL_NUMBER);
+		                if(serial_number !=NULL)
+		                {
+					strncpy(serialNum ,serial_number, sizeof(serialNum));
+					WebConfigLog("serialNum: %s\n", serialNum);
+					WAL_FREE(serial_number);
+		                }
+			}
 
 			if( serialNum != NULL && strlen(serialNum)>0 )
 			{
-				execute_token_script(output, WEBPA_READ_HEADER, sizeof(output), deviceMAC, serialNum);
+				execute_token_script(output, WEBPA_READ_HEADER, sizeof(output), get_global_deviceMAC(), serialNum);
 				if ((strlen(output) == 0))
 				{
 					WebConfigLog("Unable to get auth token\n");
@@ -1094,12 +1295,11 @@ void getAuthToken()
 				{
 					WebConfigLog("Failed to read token from %s. Proceeding to create new token.\n",WEBPA_READ_HEADER);
 					//Call create/acquisition script
-					createNewAuthToken(webpa_auth_token, sizeof(webpa_auth_token), deviceMAC, serialNum );
-					WebcfgDebug("After createNewAuthToken\n");
+					createNewAuthToken(webpa_auth_token, sizeof(webpa_auth_token), get_global_deviceMAC(), serialNum );
 				}
 				else
 				{
-					WebcfgDebug("update webpa_auth_token in success case\n");
+					WebConfigLog("update webpa_auth_token in success case\n");
 					walStrncpy(webpa_auth_token, output, sizeof(webpa_auth_token));
 				}
 			}
@@ -1120,232 +1320,158 @@ void getAuthToken()
 }
 
 
-static void getDeviceMac()
-{
-    int retryCount = 0;
-
-    while(!strlen(deviceMAC))
-    {
-	pthread_mutex_lock(&device_mac_mutex);
-
-        int ret = -1, size =0, val_size =0,cnt =0;
-        char compName[MAX_PARAMETERNAME_LENGTH/2] = { '\0' };
-        char dbusPath[MAX_PARAMETERNAME_LENGTH/2] = { '\0' };
-        parameterValStruct_t **parameterval = NULL;
-        char *getList[] = {DEVICE_MAC};
-        componentStruct_t **        ppComponents = NULL;
-        char dst_pathname_cr[256] = {0};
-
-	if (strlen(deviceMAC))
-	{
-	        pthread_mutex_unlock(&device_mac_mutex);
-	        break;
-	}
-        sprintf(dst_pathname_cr, "%s%s", "eRT.", CCSP_DBUS_INTERFACE_CR);
-        ret = CcspBaseIf_discComponentSupportingNamespace(bus_handle, dst_pathname_cr, DEVICE_MAC, "", &ppComponents, &size);
-        if ( ret == CCSP_SUCCESS && size >= 1)
-        {
-                strncpy(compName, ppComponents[0]->componentName, sizeof(compName)-1);
-                strncpy(dbusPath, ppComponents[0]->dbusPath, sizeof(compName)-1);
-        }
-        else
-        {
-                WebConfigLog("Failed to get component for %s ret: %d\n",DEVICE_MAC,ret);
-                retryCount++;
-        }
-        free_componentStruct_t(bus_handle, size, ppComponents);
-        if(strlen(compName) != 0 && strlen(dbusPath) != 0)
-        {
-                ret = CcspBaseIf_getParameterValues(bus_handle,
-                        compName, dbusPath,
-                        getList,
-                        1, &val_size, &parameterval);
-                if(ret == CCSP_SUCCESS)
-                {
-                    for (cnt = 0; cnt < val_size; cnt++)
-                    {
-                        WebcfgDebug("parameterval[%d]->parameterName : %s\n",cnt,parameterval[cnt]->parameterName);
-                        WebcfgDebug("parameterval[%d]->parameterValue : %s\n",cnt,parameterval[cnt]->parameterValue);
-                        WebcfgDebug("parameterval[%d]->type :%d\n",cnt,parameterval[cnt]->type);
-                    }
-                    macToLowerCase(parameterval[0]->parameterValue);
-                    retryCount = 0;
-                }
-                else
-                {
-                        WebConfigLog("Failed to get values for %s ret: %d\n",getList[0],ret);
-                        retryCount++;
-                }
-                free_parameterValStruct_t(bus_handle, val_size, parameterval);
-        }
-        if(retryCount == 0)
-        {
-                WebcfgDebug("deviceMAC is %s\n",deviceMAC);
-                pthread_mutex_unlock(&device_mac_mutex);
-                break;
-        }
-        else
-        {
-                if(retryCount > 5 )
-                {
-                        WebConfigLog("Unable to get CM Mac after %d retry attempts..\n", retryCount);
-                        pthread_mutex_unlock(&device_mac_mutex);
-                        break;
-                }
-                else
-                {
-                        WebConfigLog("Failed to GetValue for MAC. Retrying...retryCount %d\n", retryCount);
-                        pthread_mutex_unlock(&device_mac_mutex);
-                        sleep(10);
-                }
-        }
-    }
-}
-
-static void macToLowerCase(char macValue[])
-{
-    int i = 0;
-    int j;
-    char *token[32]={'\0'};
-    char tmp[32]={'\0'};
-    strncpy(tmp, macValue,sizeof(tmp)-1);
-    token[i] = strtok(tmp, ":");
-    if(token[i]!=NULL)
-    {
-        strncpy(deviceMAC, token[i],sizeof(deviceMAC)-1);
-        deviceMAC[31]='\0';
-        i++;
-    }
-    while ((token[i] = strtok(NULL, ":")) != NULL)
-    {
-        strncat(deviceMAC, token[i],sizeof(deviceMAC)-1);
-        deviceMAC[31]='\0';
-        i++;
-    }
-    deviceMAC[31]='\0';
-    for(j = 0; deviceMAC[j]; j++)
-    {
-        deviceMAC[j] = tolower(deviceMAC[j]);
-    }
-}
-
-void Send_Notification_Task(char *url, long status_code, char *application_status, int application_details, char *previous_sync_time, char *version)
+//To handle webconfig notification tasks
+static void initWebConfigNotifyTask()
 {
 	int err = 0;
-	//pthread_t NotificationThreadId;
-	notify_params_t *args = NULL;
 
+	err = pthread_create(&NotificationThreadId, NULL, processWebConfigNotification, NULL);
+	if (err != 0)
+	{
+		WebConfigLog("Error creating Webconfig Notification thread :[%s]\n", strerror(err));
+	}
+	else
+	{
+		WebConfigLog("Webconfig Notification thread created Successfully\n");
+	}
+
+}
+
+void addWebConfigNotifyMsg(char *url, long status_code, char *application_status, int application_details, char *request_timestamp, char *version, char *transaction_uuid)
+{
+	notify_params_t *args = NULL;
 	args = (notify_params_t *)malloc(sizeof(notify_params_t));
 
 	if(args != NULL)
 	{
+                WebcfgDebug("pthread mutex lock\n");
+		pthread_mutex_lock (&notify_mut);
 		memset(args, 0, sizeof(notify_params_t));
-		WebcfgDebug("Send_Notification_Task: start processing\n");
 		if(url != NULL)
 		{
 			args->url = strdup(url);
-			WebcfgDebug("args->url: %s\n", args->url);
+			WAL_FREE(url);
 		}
 		args->status_code = status_code;
-		WebcfgDebug("args->status_code: %d\n", args->status_code);
 		if(application_status != NULL)
 		{
 			args->application_status = strdup(application_status);
-			WebcfgDebug("args->application_status: %s\n", args->application_status);
 		}
 		args->application_details = application_details;
-		WebcfgDebug("args->application_details: %d\n", args->application_details);
-		if(previous_sync_time != NULL)
+		if(request_timestamp != NULL)
 		{
-			args->previous_sync_time = strdup(previous_sync_time);
-			WebcfgDebug("args->previous_sync_time: %s\n", args->previous_sync_time);
+			args->request_timestamp = strdup(request_timestamp);
+			WAL_FREE(request_timestamp);
 		}
 		if(version != NULL)
 		{
 			args->version = strdup(version);
-			WebcfgDebug("args->version: %s\n", args->version);
+			WAL_FREE(version);
 		}
-		WebcfgDebug("args values are printing\n");
-		WebConfigLog("args->url:%s args->status_code:%d args->application_status:%s args->application_details:%d args->previous_sync_time:%s args->version:%s\n", args->url, args->status_code, args->application_status, args->application_details, args->previous_sync_time, args->version );
-		WebcfgDebug("creating processWebConfigNotification thread\n");
-		err = pthread_create(&NotificationThreadId, NULL, processWebConfigNotification, (void *) args);
-		if (err != 0)
+		if(transaction_uuid != NULL)
 		{
-			WebConfigLog("Error creating Webconfig Notification thread :[%s]\n", strerror(err));
+			args->transaction_uuid = strdup(transaction_uuid);
+			WAL_FREE(transaction_uuid);
 		}
-		else
-		{
-			WebConfigLog("Webconfig Notification thread created Successfully\n");
-		}
+		WebcfgDebug("args->url:%s args->status_code:%d args->application_status:%s args->application_details:%d args->request_timestamp:%s args->version:%s args->transaction_uuid:%s\n", args->url, args->status_code, args->application_status, args->application_details, args->request_timestamp, args->version, args->transaction_uuid );
+
+		notifyMsg = args;
+
+                WebcfgDebug("Before notify pthread cond signal\n");
+		pthread_cond_signal(&notify_con);
+                WebcfgDebug("After notify pthread cond signal\n");
+		pthread_mutex_unlock (&notify_mut);
+                WebcfgDebug("pthread mutex unlock\n");
 	}
 }
 
-void* processWebConfigNotification(void* pValue)
+//Notify thread function waiting for notify msgs
+void* processWebConfigNotification()
 {
-    char device_id[32] = { '\0' };
-    cJSON *notifyPayload = cJSON_CreateObject();
-    char  * stringifiedNotifyPayload;
-    notify_params_t *msg;
-    char dest[512] = {'\0'};
-    char *source = NULL;
-    cJSON * reports, *one_report;
+	char device_id[32] = { '\0' };
+	cJSON *notifyPayload = NULL;
+	char  * stringifiedNotifyPayload;
+	notify_params_t *msg = NULL;
+	char dest[512] = {'\0'};
+	char *source = NULL;
+	cJSON * reports, *one_report;
 
-    //pthread_detach(pthread_self());
-    if(pValue)
-    {
-		msg = (notify_params_t *) pValue;
-    }
-    if(strlen(deviceMAC) == 0)
-    {
-		WebConfigLog("deviceMAC is NULL, failed to send Webconfig Notification\n");
-    }
-    else
-    {
-	snprintf(device_id, sizeof(device_id), "mac:%s", deviceMAC);
-	WebcfgDebug("webconfig Device_id %s\n", device_id);
-
-	if(notifyPayload != NULL)
+	while(1)
 	{
-		cJSON_AddStringToObject(notifyPayload,"device_id", device_id);
-
-		if(msg)
+                WebcfgDebug("processWebConfigNotification Inside while\n");
+		pthread_mutex_lock (&notify_mut);
+		WebcfgDebug("processWebConfigNotification mutex lock\n");
+		msg = notifyMsg;
+		if(msg !=NULL)
 		{
-			cJSON_AddItemToObject(notifyPayload, "reports", reports = cJSON_CreateArray());
-			cJSON_AddItemToArray(reports, one_report = cJSON_CreateObject());
-			cJSON_AddStringToObject(one_report, "url", (NULL != msg->url) ? msg->url : "unknown");
-			cJSON_AddNumberToObject(one_report,"http_status_code", msg->status_code);
-			cJSON_AddStringToObject(one_report,"document_application_status", (NULL != msg->application_status) ? msg->application_status : "unknown");
-			cJSON_AddNumberToObject(one_report,"document_application_details", msg->application_details);
-			cJSON_AddNumberToObject(one_report, "previous_sync_time", (NULL != msg->previous_sync_time) ? atoi(msg->previous_sync_time) : 0);
-			cJSON_AddStringToObject(one_report,"version", (NULL != msg->version) ? msg->version : "V1.0-NONE");
+                        WebcfgDebug("Processing msg\n");
+			if(strlen(get_global_deviceMAC()) == 0)
+			{
+				WebConfigLog("deviceMAC is NULL, failed to send Webconfig Notification\n");
+			}
+			else
+			{
+				snprintf(device_id, sizeof(device_id), "mac:%s", get_global_deviceMAC());
+				WebConfigLog("webconfig Device_id %s\n", device_id);
+
+				notifyPayload = cJSON_CreateObject();
+
+				if(notifyPayload != NULL)
+				{
+					cJSON_AddStringToObject(notifyPayload,"device_id", device_id);
+
+					if(msg)
+					{
+						cJSON_AddItemToObject(notifyPayload, "reports", reports = cJSON_CreateArray());
+						cJSON_AddItemToArray(reports, one_report = cJSON_CreateObject());
+						cJSON_AddStringToObject(one_report, "url", (NULL != msg->url) ? msg->url : "unknown");
+						cJSON_AddNumberToObject(one_report,"http_status_code", msg->status_code);
+                                                if(msg->status_code == 200)
+                                                {
+						        cJSON_AddStringToObject(one_report,"document_application_status", (NULL != msg->application_status) ? msg->application_status : "unknown");
+						        cJSON_AddNumberToObject(one_report,"document_application_details", msg->application_details);
+                                                }
+						cJSON_AddNumberToObject(one_report, "request_timestamp", (NULL != msg->request_timestamp) ? atoi(msg->request_timestamp) : 0);
+						cJSON_AddStringToObject(one_report,"version", (NULL != msg->version && (strlen(msg->version)!=0)) ? msg->version : "NONE");
+						cJSON_AddStringToObject(one_report,"transaction_uuid", (NULL != msg->transaction_uuid && (strlen(msg->transaction_uuid)!=0)) ? msg->transaction_uuid : "unknown");
+					}
+					stringifiedNotifyPayload = cJSON_PrintUnformatted(notifyPayload);
+					cJSON_Delete(notifyPayload);
+				}
+
+				snprintf(dest,sizeof(dest),"event:config-version-report/%s",device_id);
+				WebConfigLog("dest is %s\n", dest);
+
+				if (stringifiedNotifyPayload != NULL && strlen(device_id) != 0)
+				{
+					source = (char*) malloc(sizeof(char) * sizeof(device_id));
+					strncpy(source, device_id, sizeof(device_id));
+					WebConfigLog("source is %s\n", source);
+					WebConfigLog("stringifiedNotifyPayload is %s\n", stringifiedNotifyPayload);
+					sendNotification(stringifiedNotifyPayload, source, dest);
+				}
+				if(msg != NULL)
+				{
+					free_notify_params_struct(msg);
+					notifyMsg = NULL;
+				}
+			}
+			pthread_mutex_unlock (&notify_mut);
+			WebcfgDebug("processWebConfigNotification mutex unlock\n");
 		}
-		stringifiedNotifyPayload = cJSON_PrintUnformatted(notifyPayload);
-		cJSON_Delete(notifyPayload);
+		else
+		{
+			WebcfgDebug("Before pthread cond wait in notify thread\n");
+			pthread_cond_wait(&notify_con, &notify_mut);
+			pthread_mutex_unlock (&notify_mut);
+			WebcfgDebug("mutex unlock in notify thread after cond wait\n");
+		}
 	}
-
-	snprintf(dest,sizeof(dest),"event:config-version-report/%s",device_id);
-	WebcfgDebug("dest is %s\n", dest);
-
-	if (stringifiedNotifyPayload != NULL && strlen(device_id) != 0)
-        {
-		source = (char*) malloc(sizeof(char) * sizeof(device_id));
-		strncpy(source, device_id, sizeof(device_id));
-		WebcfgDebug("source is %s\n", source);
-
-		sendNotification(stringifiedNotifyPayload, source, dest);
-	}
-	WebConfigLog("After sendNotification\n");
-	if(msg != NULL)
-	{
-		free_notify_params_struct(msg);
-	}
-   }
-   return NULL;
+	return NULL;
 }
 
 void free_notify_params_struct(notify_params_t *param)
 {
-    WebcfgDebug("Inside free_notify_params_struct\n");
     if(param != NULL)
     {
         if(param->url != NULL)
@@ -1356,17 +1482,20 @@ void free_notify_params_struct(notify_params_t *param)
         {
             WAL_FREE(param->application_status);
         }
-        if(param->previous_sync_time != NULL)
+        if(param->request_timestamp != NULL)
         {
-            WAL_FREE(param->previous_sync_time);
+            WAL_FREE(param->request_timestamp);
         }
         if(param->version != NULL)
         {
             WAL_FREE(param->version);
         }
+	if(param->transaction_uuid != NULL)
+        {
+	    WAL_FREE(param->transaction_uuid);
+        }
         WAL_FREE(param);
     }
-    WebcfgDebug("End of free_notify_params_struct\n");
 }
 
 char *replaceMacWord(const char *s, const char *macW, const char *deviceMACW)
@@ -1375,8 +1504,6 @@ char *replaceMacWord(const char *s, const char *macW, const char *deviceMACW)
 	int i, cnt = 0;
 	int deviceMACWlen = strlen(deviceMACW);
 	int macWlen = strlen(macW);
-	WebcfgDebug("Inside replaceMacWord\n");
-	WebcfgDebug("deviceMACWlen:%d macWlen:%d\n", deviceMACWlen, macWlen);
 	// Counting the number of times mac word occur in the string
 	for (i = 0; s[i] != '\0'; i++)
 	{
@@ -1402,6 +1529,5 @@ char *replaceMacWord(const char *s, const char *macW, const char *deviceMACW)
 		    result[i++] = *s++;
 	}
 	result[i] = '\0';
-	WebcfgDebug("End replaceMacWord. result is %s\n", result);
 	return result;
 }
