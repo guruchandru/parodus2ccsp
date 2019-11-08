@@ -92,7 +92,7 @@ Webpa_SetParamStringValue
                 {
                         WalError("Received insufficient data to process notification\n");
                 }
-
+                WAL_FREE(tmpStr);
         #endif
                 WAL_FREE(tmpStr);
                 return TRUE;
