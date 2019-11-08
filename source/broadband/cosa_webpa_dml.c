@@ -94,7 +94,6 @@ Webpa_SetParamStringValue
                 }
                 WAL_FREE(tmpStr);
         #endif
-                WAL_FREE(tmpStr);
                 return TRUE;
         }    
 
