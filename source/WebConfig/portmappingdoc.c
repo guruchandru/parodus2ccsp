@@ -16,8 +16,9 @@
 #include <errno.h>
 #include <string.h>
 #include <msgpack.h>
+#include <stdarg.h>
 
-#include "array_helpers.h"
+#include "helpers.h"
 #include "portmappingdoc.h"
 
 /*----------------------------------------------------------------------------*/
@@ -56,8 +57,7 @@ enum {
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
 int process_portdocparams( portdoc_t *e, msgpack_object_map *map );
-int process_portmappingdoc( portmappingdoc_t *pm, msgpack_object *obj );
-
+int process_portmappingdoc( portmappingdoc_t *pm, int num, ...); 
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
@@ -65,7 +65,8 @@ int process_portmappingdoc( portmappingdoc_t *pm, msgpack_object *obj );
 /* See portmappingdoc.h for details. */
 portmappingdoc_t* portmappingdoc_convert( const void *buf, size_t len )
 {
-	return helper_convert_array( buf, len, sizeof(portmappingdoc_t), true,
+	return helper_convert( buf, len, sizeof(portmappingdoc_t), "portforwarding", 
+                            MSGPACK_OBJECT_ARRAY, true,
                            (process_fn_t) process_portmappingdoc,
                            (destroy_fn_t) portmappingdoc_destroy );
 }
@@ -75,19 +76,24 @@ void portmappingdoc_destroy( portmappingdoc_t *pm )
 {
     if( NULL != pm ) {
         size_t i;
-        for( i = 0; i < pm->entries_count; i++ ) {
-            if( NULL != pm->entries[i].internal_client ) {
+        for( i = 0; i < pm->entries_count; i++ )
+        {
+            if( NULL != pm->entries[i].internal_client )
+            {
                 free( pm->entries[i].internal_client );
             }
 	    
-	    if( NULL != pm->entries[i].protocol ) {
+	    if( NULL != pm->entries[i].protocol )
+            {
                 free( pm->entries[i].protocol );
             }
-	    if( NULL != pm->entries[i].description ) {
+	    if( NULL != pm->entries[i].description )
+            {
                 free( pm->entries[i].description );
             }
         }
-        if( NULL != pm->entries ) {
+        if( NULL != pm->entries )
+        {
             free( pm->entries );
         }
         free( pm );
@@ -112,7 +118,8 @@ const char* portmappingdoc_strerror( int errnum )
 
     while( (map[i].v != errnum) && (NULL != map[i].txt) ) { i++; }
 
-    if( NULL == map[i].txt ) {
+    if( NULL == map[i].txt )
+    {
         return "Unknown error.";
     }
 
@@ -137,58 +144,49 @@ int process_portdocparams( portdoc_t *e, msgpack_object_map *map )
     msgpack_object_kv *p;
 
     p = map->ptr;
-    //printf("map size:%d\n",left);
-    while( (0 < objects_left) && (0 < left--) ) {
-        if( MSGPACK_OBJECT_STR == p->key.type ) {
-               //printf("value of key is : %s\n",p->key.via.str.ptr);
-              if( MSGPACK_OBJECT_STR == p->val.type ) {
-                //printf("value of key is : %s\n",p->key.via.str.ptr);
-                if( 0 == strncmp(p->key.via.str.ptr, "ExternalPortEndRange",strlen("ExternalPortEndRange"))) {
+    printf("map size:%d\n",left);
+    while( (0 < objects_left) && (0 < left--) )
+    {
+        if( MSGPACK_OBJECT_STR == p->key.type )
+        {
+              if( MSGPACK_OBJECT_STR == p->val.type )
+              {
+                if( 0 == strncmp(p->key.via.str.ptr, "ExternalPortEndRange",strlen("ExternalPortEndRange")))
+                {
                     e->external_port_end_range = strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    //printf("value external port range is : %s\n",e->external_port_end_range);
-                    //printf("string compare : %d\n",p->key.via.str.size);
-                    //printf("string compare : %s\n",p->key.via.str.ptr);
                     objects_left &= ~(1 << 1);
-                    //printf("objects_left afxter externalportrange %d\n", objects_left);
                 } 
-                else if( 0 == match(p, "ExternalPort") ) {
+                else if( 0 == match(p, "ExternalPort") )
+                {
                     e->external_port = strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    // printf("value external port is : %s\n",e->external_port);
-                    // printf("string compare : %d\n",p->key.via.str.size);
-                    // printf("string compare : %s\n",p->key.via.str.ptr);
                     objects_left &= ~(1 << 2);
-                    // printf("objects_left after externalport %d\n", objects_left);
                 }
             
-               else if( 0 == match(p, "InternalClient") ) {
+                else if( 0 == match(p, "InternalClient") )
+                {
                     e->internal_client = strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    //printf("value internal client is : %s\n",e->internal_client);
                     objects_left &= ~(1 << 3);
-                    //printf("objects_left after internal %d\n", objects_left);
                 } 
-                else if( 0 == match(p, "Protocol") ) {
+                else if( 0 == match(p, "Protocol") )
+                {
                     e->protocol = strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    //printf("value protocol is : %s\n",e->protocol);
                     objects_left &= ~(1 << 4);
-                    //printf("objects_left after protocol %d\n", objects_left);
                 }
-               else if( 0 == match(p, "Description") ) {
+                else if( 0 == match(p, "Description") )
+                {
                     e->description = strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    //printf("value description is : %s\n",e->description);
                     objects_left &= ~(1 << 5);
-                    //printf("objects_left after description %d\n", objects_left);
                 }
     
-	        else if( 0 == match(p, "Enable") ) {
+	        else if( 0 == match(p, "Enable") )
+                {
 	            e->enable =  strndup( p->val.via.str.ptr, p->val.via.str.size );
-                    //printf("value enable is : %s\n",e->enable);
 	            objects_left &= ~(1 << 6);
-                    //printf("objects_left after enable %d\n", objects_left);
 	        }
             }
-            }
-           p++;  
         }
+           p++;
+    }
         
     
     //printf("objects_left after out %d\n", objects_left);
@@ -207,32 +205,57 @@ int process_portdocparams( portdoc_t *e, msgpack_object_map *map )
     return (0 == objects_left) ? 0 : -1;
 }
 
-int process_portmappingdoc( portmappingdoc_t *pm, msgpack_object *obj )
-{
+int process_portmappingdoc( portmappingdoc_t *pm,int num, ... )
+{   
+    va_list valist;
+    va_start(valist, num);
+    
+    msgpack_object *obj = va_arg(valist, msgpack_object *);
     msgpack_object_array *array = &obj->via.array;
-    if( 0 < array->size ) {
+
+    if( 0 < array->size )
+    {
         size_t i;
 
         pm->entries_count = array->size;
        
+        msgpack_object *obj1 = va_arg(valist, msgpack_object *);
+        pm->version = (uint32_t) obj1->via.u64;
+
+        msgpack_object *obj2 = va_arg(valist, msgpack_object *);
+        pm->transaction_id = (uint16_t) obj2->via.u64;
+
+        va_end(valist);
+
+        printf("pm->version in blob is %ld\n",(long)pm->version);
+        printf("pm->transaction_id in blob is %d\n",pm->transaction_id);
+
         pm->entries = (portdoc_t *) malloc( sizeof(portdoc_t) * pm->entries_count );
-        if( NULL == pm->entries ) {
+
+        if( NULL == pm->entries )
+        {
+            printf("entries count is null\n");
             pm->entries_count = 0;
             return -1;
         }
 
         memset( pm->entries, 0, sizeof(portdoc_t) * pm->entries_count );
-        for( i = 0; i < pm->entries_count; i++ ) {
-            if( MSGPACK_OBJECT_MAP != array->ptr[i].type ) {
+
+        for( i = 0; i < pm->entries_count; i++ )
+        {
+            if( MSGPACK_OBJECT_MAP != array->ptr[i].type )
+            {
+                printf("invalid PM_OBJECT \n");
                 errno = PM_INVALID_PM_OBJECT;
                 return -1;
             }
-            //printf("\n");
-            //printf("i value is given as: %ld\n",i);
-            if( 0 != process_portdocparams(&pm->entries[i], &array->ptr[i].via.map) ) {
+
+            if( 0 != process_portdocparams(&pm->entries[i], &array->ptr[i].via.map) )
+            {
 		printf("process_portdocparams failed\n");
                 return -1;
             }
+           
         }
     }
 

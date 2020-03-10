@@ -129,7 +129,7 @@ void processMultipartDocument()
 
 			/************ portmapping inner blob decode ****************/
 
-			/*portmappingdoc_t *rpm;
+			portmappingdoc_t *rpm;
 			WebConfigLog("--------------decode blob-------------\n");
 			rpm = portmappingdoc_convert( pm->entries[0].value, pm->entries[0].value_size );
 
@@ -149,12 +149,12 @@ void processMultipartDocument()
 
 				portmappingdoc_destroy( rpm );
 
-			}*/
+			}
 			/************ portmapping inner blob decode ****************/
 
 			/************ macbinding inner blob decode ****************/
 
-			macbindingdoc_t *rpm;
+		/*	macbindingdoc_t *rpm;
 			printf("--------------decode blob-------------\n");
 			rpm = macbindingdoc_convert( pm->entries[0].value, pm->entries[0].value_size );
 			if(NULL != rpm)
@@ -168,7 +168,7 @@ void processMultipartDocument()
 				}
 
 				macbindingdoc_destroy( rpm );
-			}
+			}*/
 			/************ macbinding inner blob decode ****************/
 
 			webcfgparam_destroy( pm );

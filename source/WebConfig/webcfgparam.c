@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <string.h>
 #include <msgpack.h>
+#include <stdarg.h>
 
 #include "helpers.h"
 #include "webcfgparam.h"
@@ -45,7 +46,7 @@ enum {
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
 int process_params( wparam_t *e, msgpack_object_map *map );
-int process_webcfgparam( webcfgparam_t *pm, msgpack_object *obj );
+int process_webcfgparam( webcfgparam_t *pm,int num, ...);
 
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
@@ -63,17 +64,22 @@ webcfgparam_t* webcfgparam_convert( const void *buf, size_t len )
 /* See webcfgparam.h for details. */
 void webcfgparam_destroy( webcfgparam_t *pm )
 {
-    if( NULL != pm ) {
+    if( NULL != pm )
+    {
         size_t i;
-        for( i = 0; i < pm->entries_count; i++ ) {
-            if( NULL != pm->entries[i].name ) {
+        for( i = 0; i < pm->entries_count; i++ )
+        {
+            if( NULL != pm->entries[i].name )
+            {
                 free( pm->entries[i].name );
             }
-	    if( NULL != pm->entries[i].value ) {
+	    if( NULL != pm->entries[i].value )
+            {
               //  free( pm->entries[i].value );
             }
         }
-        if( NULL != pm->entries ) {
+        if( NULL != pm->entries )
+    {
             free( pm->entries );
         }
         free( pm );
@@ -98,7 +104,8 @@ const char* webcfgparam_strerror( int errnum )
 
     while( (map[i].v != errnum) && (NULL != map[i].txt) ) { i++; }
 
-    if( NULL == map[i].txt ) {
+    if( NULL == map[i].txt )
+    {
         return "Unknown error.";
     }
 
@@ -119,77 +126,98 @@ const char* webcfgparam_strerror( int errnum )
 int process_params( wparam_t *e, msgpack_object_map *map )
 {
     int left = map->size;
-    uint8_t objects_left = 0x03;
+    uint8_t objects_left = 0x04;
     msgpack_object_kv *p;
 
     p = map->ptr;
-    while( (0 < objects_left) && (0 < left--) ) {
-        if( MSGPACK_OBJECT_STR == p->key.type ) {
-            if( MSGPACK_OBJECT_POSITIVE_INTEGER == p->val.type ) {
-                if( 0 == match(p, "dataType") ) {
-                    if( UINT16_MAX < p->val.via.u64 ) {
-			//printf("e->type is %d\n", e->type);
+    while( (0 < objects_left) && (0 < left--) )
+    {
+        if( MSGPACK_OBJECT_STR == p->key.type )
+        {
+            if( MSGPACK_OBJECT_POSITIVE_INTEGER == p->val.type )
+            {
+                if( 0 == match(p, "dataType") )
+                {
+                    if( UINT16_MAX < p->val.via.u64 )
+                    {
                         errno = PM_INVALID_DATATYPE;
                         return -1;
-                    } else {
-                        e->type = (uint16_t) p->val.via.u64;
-			//printf("e->type is %d\n", e->type);
                     }
-                    objects_left &= ~(1 << 0);
-		    //printf("objects_left after datatype %d\n", objects_left);
+                    else
+                    {
+                        e->type = (uint16_t) p->val.via.u64;
+                    }
+                    objects_left &= ~(1 << 2);
                 }
-            } else if( MSGPACK_OBJECT_STR == p->val.type ) {
-                if( 0 == match(p, "name") ) {
+            }
+            else if( MSGPACK_OBJECT_STR == p->val.type )
+            {
+                if( 0 == match(p, "name") )
+                {
                     e->name = strndup( p->val.via.str.ptr, p->val.via.str.size );
-		    //printf("e->name is %s\n", e->name);
-                    objects_left &= ~(1 << 1);
-		    //printf("objects_left after name %d\n", objects_left);
+                    objects_left &= ~(1 << 0);
                 }
-		if( 0 == match(p, "value") ) {
-                    //e->value = strndup( p->val.via.str.ptr, p->val.via.str.size );
+		if( 0 == match(p, "value") )
+        {
 		    e->value = (char*)p->val.via.str.ptr;
 		    e->value_size =(int) p->val.via.str.size;
 			WebConfigLog("uint32_t size %d\n", (uint32_t)p->val.via.str.size);
 		    WebConfigLog("e->value_size int is %d\n", e->value_size);
 		    WebConfigLog("e->value is %s\n", e->value);
-                    objects_left &= ~(1 << 2);
-		    //printf("objects_left after value %d\n", objects_left);
-                }
+            objects_left &= ~(1 << 2);
+        }
 	
             }
         }
         p++;
     }
 
-    if( 1 & objects_left ) {
-    } else {
+    if( 1 & objects_left )
+    {
+    }
+    else
+    {
         errno = PM_OK;
     }
 
     return (0 == objects_left) ? 0 : -1;
 }
 
-int process_webcfgparam( webcfgparam_t *pm, msgpack_object *obj )
-{
+int process_webcfgparam( webcfgparam_t *pm,int num, ...)
+{   
+    va_list valist; 
+    va_start(valist, num);
+    
+    msgpack_object *obj = va_arg(valist, msgpack_object *);
     msgpack_object_array *array = &obj->via.array;
-    if( 0 < array->size ) {
+
+    if( 0 < array->size )
+    {
         size_t i;
 
         pm->entries_count = array->size;
+       
+        va_end(valist);
+
         pm->entries = (wparam_t *) malloc( sizeof(wparam_t) * pm->entries_count );
-        if( NULL == pm->entries ) {
+        if( NULL == pm->entries )
+        {
             pm->entries_count = 0;
             return -1;
         }
 
         memset( pm->entries, 0, sizeof(wparam_t) * pm->entries_count );
-        for( i = 0; i < pm->entries_count; i++ ) {
-            if( MSGPACK_OBJECT_MAP != array->ptr[i].type ) {
+       
+        for( i = 0; i < pm->entries_count; i++ )
+        {
+            if( MSGPACK_OBJECT_MAP != array->ptr[i].type )
+            {
                 errno = PM_INVALID_PM_OBJECT;
                 return -1;
             }
-            if( 0 != process_params(&pm->entries[i], &array->ptr[i].via.map) ) {
-		printf("process_params failed\n");
+            if( 0 != process_params(&pm->entries[i], &array->ptr[i].via.map) )
+			{
+		        WebConfigLog("process_params failed\n");
                 return -1;
             }
         }

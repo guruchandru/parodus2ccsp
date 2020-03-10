@@ -27,7 +27,8 @@ typedef struct
     uint16_t type;
 } wparam_t;
 
-typedef struct {
+typedef struct
+{
     wparam_t *entries;
     size_t      entries_count;
 } webcfgparam_t;

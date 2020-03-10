@@ -32,6 +32,8 @@ typedef struct
 typedef struct {
     portdoc_t *entries;       
     size_t      entries_count;
+    uint32_t  version;
+    uint16_t  transaction_id;
 } portmappingdoc_t;
 
 /**

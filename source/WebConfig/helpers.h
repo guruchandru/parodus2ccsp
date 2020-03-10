@@ -37,7 +37,7 @@ enum {
     HELPERS_MISSING_WRAPPER
 };
 
-typedef int (*process_fn_t)(void *, msgpack_object *);
+typedef int (*process_fn_t)(void *, int, ...);
 typedef void (*destroy_fn_t)(void *);
 
 /*----------------------------------------------------------------------------*/
