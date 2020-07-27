@@ -66,7 +66,6 @@ char *objectList[] ={
 "Device.XHosts.",
 "Device.X_CISCO_COM_MTA.",
 "Device.X_RDKCENTRAL-COM_XDNS.",
-"Device.X_RDKCENTRAL-COM_Report.",
 "Device.SelfHeal.",
 "Device.LogBackup.",
 "Device.IoT.",
