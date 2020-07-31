@@ -126,6 +126,16 @@ X_RDK_WebConfig_SetParamStringValue
 			WebcfgInfo("Data set is Not supported\n");
             return TRUE;
 		}
+		if( AnscEqualString(ParamName, "SupppotedDocs", TRUE))
+                {
+			WebcfgInfo("SupppotedDocs set is Not supported\n");
+                        return TRUE;
+                }
+                if( AnscEqualString(ParamName, "SupppotedSchemaVersion", TRUE))
+                {
+			WebcfgInfo("SupppotedSchemaVersion set is Not supported\n");
+                        return TRUE;
+                }
 	WebcfgDebug(" %s : EXIT \n", __FUNCTION__ );
 
 	return FALSE;
@@ -187,6 +197,60 @@ X_RDK_WebConfig_GetParamStringValue
 		         }
 	        }
                 return 0;
+        }
+        if( AnscEqualString(ParamName, "SupportedDocs", TRUE))
+	    {
+                WebcfgInfo(("[%s] at [%d]parameter '%s'\n",__FUNCTION__,__LINE__, ParamName));
+                char * docValue = NULL;
+
+                docValue = getsupportedDocs();
+
+                if (docValue != NULL)
+                {
+                         WebcfgInfo("The docValue fetched is %s size %zu\n",docValue, strlen(docValue));
+
+			 if(*pUlSize <= strlen(docValue))
+                         {
+			     *pUlSize = strlen(docValue) + 1;
+			     return 1;
+		         }
+		         /* collect value */
+		         AnscCopyString(pValue, docValue);
+                         WebcfgInfo("The pValue is %s\n",pValue);
+		        /* if(docValue != NULL)
+		         {
+			     free(docValue);
+			     docValue = NULL;
+		         }*/
+	        }
+                return 0;
+        }
+        if( AnscEqualString(ParamName, "SupportedSchemaVersion", TRUE))
+	    {
+                WebcfgInfo(("[%s] at [%d]parameter '%s'\n",__FUNCTION__,__LINE__, ParamName));
+                char * versionValue = NULL;
+
+                versionValue = getsupportedVersion();
+
+                if (versionValue != NULL)
+                {
+                         WebcfgInfo("The versionValue fetched is %s size %zu\n",versionValue, strlen(versionValue));
+
+			 if(*pUlSize <= strlen(versionValue))
+                         {
+			     *pUlSize = strlen(versionValue) + 1;
+			     return 1;
+		         }
+		         /* collect value */
+		         AnscCopyString(pValue, versionValue);
+                         WebcfgInfo("The pValue is %s\n",pValue);
+		     /*    if(versionValue != NULL)
+		         {
+			     free(versionValue);
+			     versionValue = NULL;
+		         }*/
+	        }
+		return 0;
         }
 
 	WebcfgDebug("------- %s ----- EXIT ----\n",__FUNCTION__);

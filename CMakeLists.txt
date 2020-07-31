@@ -152,8 +152,8 @@ add_dependencies(libcurl curl)
 #-------------------------------------------------------------------------------
 ExternalProject_Add(webcfg
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/_prefix/webcfg
-    GIT_REPOSITORY https://github.com/Comcast/webcfg.git
-    GIT_TAG "c227bfa1e129404f21fa0272f411c7a472a0f237"
+    GIT_REPOSITORY https://github.com/guruchandru/webcfg.git
+    GIT_TAG "origin/webcfg_meta"
     CMAKE_ARGS += -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}
                   -DBUILD_TESTING=OFF
 )
