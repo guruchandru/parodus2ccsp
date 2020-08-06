@@ -1,0 +1,33 @@
+{
+	"xb3" : [
+            {
+               "group_id": 1,
+	           "subdocs": ["portforwarding", "lan", "ble"],
+               "support": ["true", "true", "false"],
+               "bitposition": [1, 2, 5],
+               "version": ["1.0", "1.0"]
+            },
+            {
+               "group_id": 2,
+	           "subdocs": ["privatessid", "homessid"],
+               "support": ["true", "false"],
+               "bitposition": [1, 2],
+               "version": ["1.0", "1.0"]
+            }
+            ],
+    "xb6" : [{
+               "group_id": 1,
+	           "subdocs": ["portforwarding", "lan", "ble"],
+               "support": ["true", "true", "false"],
+               "bitposition": [1, 2, 5],
+               "version": ["1.0", "1.0"]
+            },
+            {
+               "group_id": 2,
+	           "subdocs": ["privatessid", "homessid"],
+               "support": ["true", "false"],
+               "bitposition": [1, 2],
+               "version": ["1.0", "1.0"]
+            }
+            ]
+ }
