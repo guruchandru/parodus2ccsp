@@ -332,7 +332,7 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
                                   else
 				  {
 				      WebcfgInfo("Inside the null");
-				      paramVal[k]->parameterValue = strdup("");
+				      paramVal[k]->parameterValue = strndup("",MAX_PARAMETERVALUE_LEN);
 				  }
                                   paramVal[k]->type = ccsp_string;
 				  k++;
@@ -350,14 +350,16 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
                                   else
 				  {
 				      WebcfgInfo("Inside the null");
-				      paramVal[k]->parameterValue = strdup("");
+				      paramVal[k]->parameterValue = strndup("",MAX_PARAMETERVALUE_LEN);
 				  }
                                   paramVal[k]->type = ccsp_string;
 				  k++;
                             }
                             else
                             {
+				WebcfgInfo("Before freeing normal pointer\n");
                                 WAL_FREE(paramVal[k]);
+				WebcfgInfo("After freeing normal pointer\n");
                                 matchFound = 0;
                             }
                         }
@@ -422,10 +424,13 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
 				{
 					WebcfgDebug("Webpa get : Datafetched %s\n", b64buffer);
 					paramVal[k]->parameterValue = strdup(b64buffer);
-					paramVal[k]->type = ccsp_string;
-
 				}
-				k++;
+				else
+				{
+					paramVal[k]->parameterValue = strndup("",MAX_PARAMETERVALUE_LEN);
+				}
+                                paramVal[k]->type = ccsp_string;
+                                k++;
 
 				WebcfgInfo("Webpa wildcard get for SupportedDocs\n");
 				paramVal[k] = (parameterValStruct_t *) malloc(sizeof(parameterValStruct_t));
@@ -439,7 +444,8 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
      				}
 				else
 				{
-					paramVal[k]->parameterValue = strdup("");
+					paramVal[k]->parameterValue = strndup("",MAX_PARAMETERVALUE_LEN);
+					WebcfgInfo("After the wildcard null\n");
 				}
                                 paramVal[k]->type = ccsp_string;
 				k++;
@@ -457,7 +463,8 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
 				else
 				{
 					WebcfgInfo("Inside the wildcard null\n");
-					paramVal[k]->parameterValue = strdup("");
+					paramVal[k]->parameterValue = strndup("",MAX_PARAMETERVALUE_LEN);
+					WebcfgInfo("After the wildcard null\n");
 				}
                                 paramVal[k]->type = ccsp_string;
 				k++;
@@ -484,18 +491,20 @@ int getWebConfigParameterValues(char **parameterNames, int paramCount, int *val_
 		WebcfgInfo("After Freeing the value in wildcard \n");
                 WAL_FREE(paramVal[k]);
             }
+	    WebcfgInfo("Before freeing pointer\n");
             WAL_FREE(paramVal);
+	    WebcfgInfo("After freeing pointer\n");
             return CCSP_CR_ERR_UNSUPPORTED_NAMESPACE;
         }
     }
     *val = paramVal;
     for(i=0; i<k; i++)
     {
-        WebcfgDebug("Final-> %s %s %d\n",(*val)[i]->parameterName, (*val)[i]->parameterValue, (*val)[i]->type);
+        WebcfgInfo("Final-> %s %s %d\n",(*val)[i]->parameterName, (*val)[i]->parameterValue, (*val)[i]->type);
     }
     *val_size = k;
-    WebcfgDebug("Final count is %d\n",*val_size);
-    WebcfgDebug("*********** %s ***************\n",__FUNCTION__);
+    WebcfgInfo("Final count is %d\n",*val_size);
+    WebcfgInfo("*********** %s ***************\n",__FUNCTION__);
     return CCSP_SUCCESS;
 }
 
