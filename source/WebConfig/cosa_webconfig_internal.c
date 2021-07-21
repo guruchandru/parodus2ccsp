@@ -89,6 +89,7 @@ int setRfcEnable(BOOL bValue)
 		}
 	}  
 #ifdef RDKB_BUILD
+	WebcfgInfo("The psm_set value path is %s\n", g_Subsystem);
 	retPsmSet = PSM_Set_Record_Value2(bus_handle,g_Subsystem, paramRFCEnable, ccsp_string, buf);
         if (retPsmSet != CCSP_SUCCESS)
         {
@@ -172,7 +173,7 @@ int Set_Webconfig_URL( char *pString)
         memset( pMyObject->URL, 0, sizeof( pMyObject->URL ));
         AnscCopyString( pMyObject->URL, pString );
 
-
+	WebcfgInfo("The psm_set value path is %s\n", g_Subsystem);
         retPsmSet = PSM_Set_Record_Value2(bus_handle,g_Subsystem, WEBCONFIG_PARAM_URL, ccsp_string, pString);
         if (retPsmSet != CCSP_SUCCESS)
         {
@@ -243,6 +244,7 @@ int Set_Supplementary_URL( char *name, char *pString)
                 AnscCopyString( pMyObject->Telemetry, pString );
                 snprintf(tempParam, MAX_BUFF_SIZE, "%s%s", WEBCONFIG_PARAM_SUPPLEMENTARY_SERVICE, name);
 		WebcfgDebug("tempParam is %s\n", tempParam);
+		WebcfgInfo("The psm_set value path is %s\n", g_Subsystem);
 		retPsmSet = PSM_Set_Record_Value2(bus_handle,g_Subsystem, tempParam, ccsp_string, pString);
         }
         else
