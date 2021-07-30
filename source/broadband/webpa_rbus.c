@@ -721,3 +721,83 @@ WDMP_STATUS regWebpaDataModel()
 	WalInfo("rbus reg status returned is %d\n", status);
 	return status;
 }
+
+void getValues_rbus(const char *paramName[], const unsigned int paramCount, int index, money_trace_spans *timeSpan, param_t ***paramArr, int *retValCount, int *retStatus)
+{
+	int cnt1=0;
+	int resCount = 0;
+	rbusError_t rc;
+	rbusProperty_t props = NULL;
+	rbusProperty_t next;
+	char* paramValue = NULL;
+
+	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
+
+	for(cnt1 = 0; cnt1 < paramCount; cnt1++)
+	{
+		WalInfo("rbus_getExt paramName[%d] : %s paramCount %d\n",cnt1,paramName[cnt1], paramCount);
+		//walStrncpy(parameterName,paramName[cnt1],sizeof(parameterName));
+		//WalInfo("rbus_getExt for parameterName %s paramCount %d\n", parameterName, paramCount);
+		if(!rbus_handle)
+		{
+			WalError("getValues_rbus Failed as rbus_handle is not initialized\n");
+			return;
+		}
+		rc = rbus_getExt(rbus_handle, paramCount, &paramName[cnt1], &resCount, &props);
+		WalInfo("After rbus_getExt\n");
+
+		WalInfo("rbus_getExt rc=%d resCount=%d\n", rc, resCount);
+		if(props)
+		{
+			WalInfo("Response Param is %s\n", rbusProperty_GetName(props));
+			//rbusValueType_t type_t;
+			rbusValue_t paramValue_t = rbusProperty_GetValue(props);
+
+			if(paramValue_t)
+			{
+				//type_t = rbusValue_GetType(paramValue_t);
+				//if(type_t == RBUS_STRING)
+				paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
+				WalInfo("Response paramValue is %s\n", paramValue);
+				(*paramArr)[0] = (param_t *) malloc(sizeof(param_t));
+				WalInfo("Framing paramArr ..\n");
+				(*paramArr)[0][0].name = rbusProperty_GetName(props);
+				(*paramArr)[0][0].value = paramValue;
+				(*paramArr)[0][0].type = 0; //string.
+				WalInfo("success: %s %s %d \n",(*paramArr)[0][0].name,(*paramArr)[0][0].value, (*paramArr)[0][0].type);
+				*retValCount = resCount;
+				*retStatus = (int)rc;
+
+			}
+			else
+			{
+				WalError("Parameter value from rbus_getExt is empty\n");
+			}
+		}
+
+	}
+	WalInfo("getValues_rbus End\n");
+}
+
+//To map Rbus error code to Ccsp error codes.
+int mapRbusStatus(int Rbus_error_code)
+{
+    int CCSP_error_code = CCSP_Msg_Bus_ERROR;
+    switch (Rbus_error_code)
+    {
+        case  0  : CCSP_error_code = CCSP_Msg_Bus_OK; break;
+        case  1  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  2  : CCSP_error_code = 9007; break;// CCSP_ERR_INVALID_PARAMETER_VALUE
+        case  3  : CCSP_error_code = CCSP_Msg_Bus_OOM; break;
+        case  4  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  5  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  6  : CCSP_error_code = CCSP_Msg_BUS_TIMEOUT; break;
+        case  7  : CCSP_error_code = CCSP_Msg_BUS_TIMEOUT; break;
+        case  8  : CCSP_error_code = CCSP_ERR_UNSUPPORTED_PROTOCOL; break;
+        case  9  : CCSP_error_code = CCSP_Msg_BUS_NOT_SUPPORT; break;
+        case  10 : CCSP_error_code = CCSP_Msg_BUS_NOT_SUPPORT; break;
+        case  11 : CCSP_error_code = CCSP_Msg_Bus_OOM; break;
+        case  12 : CCSP_error_code = CCSP_Msg_BUS_CANNOT_CONNECT; break;
+    }
+    return CCSP_error_code;
+}

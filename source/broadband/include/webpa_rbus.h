@@ -44,7 +44,17 @@
 #define WEBPA_CID_PARAM "Device.DeviceInfo.Webpa.X_COMCAST-COM_CID"
 #define WEBPA_SYNCVERSION_PARAM "Device.DeviceInfo.Webpa.X_COMCAST-COM_SyncProtocolVersion"
 
+#define CCSP_Msg_Bus_OK             100
+#define CCSP_Msg_Bus_OOM            101
+#define CCSP_Msg_Bus_ERROR          102
+
+#define CCSP_Msg_BUS_CANNOT_CONNECT 190
+#define CCSP_Msg_BUS_TIMEOUT        191
+#define CCSP_Msg_BUS_NOT_EXIST      192
+#define CCSP_Msg_BUS_NOT_SUPPORT    193
+
 rbusError_t rbus_GetValueFromDB( char* paramName, char** paramValue);
 rbusError_t rbus_StoreValueIntoDB(char *paramName, char *value);
 
+void getValues_rbus(const char *paramName[], const unsigned int paramCount, int index, money_trace_spans *timeSpan, param_t ***paramArr, int *retValCount, int *retStatus);
 #endif
