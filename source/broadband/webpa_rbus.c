@@ -750,20 +750,19 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 		if(props)
 		{
 			WalInfo("Response Param is %s\n", rbusProperty_GetName(props));
-			//rbusValueType_t type_t;
 			rbusValue_t paramValue_t = rbusProperty_GetValue(props);
+			rbusValueType_t type_t;
 
 			if(paramValue_t)
 			{
-				//type_t = rbusValue_GetType(paramValue_t);
-				//if(type_t == RBUS_STRING)
+				type_t = rbusValue_GetType(paramValue_t);
 				paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
 				WalInfo("Response paramValue is %s\n", paramValue);
 				(*paramArr)[0] = (param_t *) malloc(sizeof(param_t));
-				WalInfo("Framing paramArr ..\n");
+				WalInfo("Framing paramArr\n");
 				(*paramArr)[0][0].name = rbusProperty_GetName(props);
 				(*paramArr)[0][0].value = paramValue;
-				(*paramArr)[0][0].type = 0; //string.
+				(*paramArr)[0][0].type = mapRbusToWdmpDataType(type_t);
 				WalInfo("success: %s %s %d \n",(*paramArr)[0][0].name,(*paramArr)[0][0].value, (*paramArr)[0][0].type);
 				*retValCount = resCount;
 				*retStatus = (int)rc;
@@ -800,4 +799,62 @@ int mapRbusStatus(int Rbus_error_code)
         case  12 : CCSP_error_code = CCSP_Msg_BUS_CANNOT_CONNECT; break;
     }
     return CCSP_error_code;
+}
+
+//maps rbus rbusValueType_t to WDMP datatype
+DATA_TYPE mapRbusToWdmpDataType(rbusValueType_t rbusType)
+{
+	DATA_TYPE wdmp_type = WDMP_NONE;
+
+	switch (rbusType)
+	{
+		case RBUS_INT16:
+		case RBUS_INT32:
+			wdmp_type = WDMP_INT;
+			break;
+		case RBUS_UINT16:
+		case RBUS_UINT32:
+			wdmp_type = WDMP_UINT;
+			break;
+		case RBUS_INT64:
+			wdmp_type = WDMP_LONG;
+			break;
+		case RBUS_UINT64:
+			wdmp_type = WDMP_ULONG;
+			break;
+		case RBUS_SINGLE:
+			wdmp_type = WDMP_FLOAT;
+			break;
+		case RBUS_DOUBLE:
+			wdmp_type = WDMP_DOUBLE;
+			break;
+		case RBUS_DATETIME:
+			wdmp_type = WDMP_DATETIME;
+			break;
+		case RBUS_BOOLEAN:
+			wdmp_type = WDMP_BOOLEAN;
+			break;
+		case RBUS_CHAR:
+		case RBUS_INT8:
+			wdmp_type = WDMP_INT;
+			break;
+		case RBUS_UINT8:
+		case RBUS_BYTE:
+			wdmp_type = WDMP_UINT;
+			break;
+		case RBUS_STRING:
+			wdmp_type = WDMP_STRING;
+			break;
+		case RBUS_BYTES:
+			wdmp_type = WDMP_BYTE;
+			break;
+		case RBUS_PROPERTY:
+		case RBUS_OBJECT:
+		case RBUS_NONE:
+		default:
+			wdmp_type = WDMP_NONE;
+			break;
+	}
+	WalInfo("mapRbusToWdmpDataType : wdmp_type is %d\n", wdmp_type);
+	return wdmp_type;
 }
