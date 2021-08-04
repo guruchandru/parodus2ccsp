@@ -728,8 +728,8 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	int resCount = 0;
 	rbusError_t rc;
 	rbusProperty_t props = NULL;
-	rbusProperty_t next;
 	char* paramValue = NULL;
+	int i =0;
 
 	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
 
@@ -737,20 +737,28 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	{
 		WalInfo("rbus_getExt paramName[%d] : %s paramCount %d\n",cnt1,paramName[cnt1], paramCount);
 		//walStrncpy(parameterName,paramName[cnt1],sizeof(parameterName));
-		//WalInfo("rbus_getExt for parameterName %s paramCount %d\n", parameterName, paramCount);
-		if(!rbus_handle)
-		{
-			WalError("getValues_rbus Failed as rbus_handle is not initialized\n");
-			return;
-		}
-		rc = rbus_getExt(rbus_handle, paramCount, &paramName[cnt1], &resCount, &props);
-		WalInfo("After rbus_getExt\n");
+	}
+	if(!rbus_handle)
+	{
+		WalError("getValues_rbus Failed as rbus_handle is not initialized\n");
+		return;
+	}
+	rc = rbus_getExt(rbus_handle, paramCount, paramName, &resCount, &props);
+	WalInfo("After rbus_getExt\n");
 
-		WalInfo("rbus_getExt rc=%d resCount=%d\n", rc, resCount);
-		if(props)
+	WalInfo("rbus_getExt rc=%d resCount=%d\n", rc, resCount);
+
+	if(RBUS_ERROR_SUCCESS != rc)
+	{
+		WalError("Failed to get value\n");
+	}
+	if(props)
+	{
+		rbusProperty_t next = props;
+		for (i = 0; i < resCount; i++)
 		{
-			WalInfo("Response Param is %s\n", rbusProperty_GetName(props));
-			rbusValue_t paramValue_t = rbusProperty_GetValue(props);
+			WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
+			rbusValue_t paramValue_t = rbusProperty_GetValue(next);
 			rbusValueType_t type_t;
 
 			if(paramValue_t)
@@ -758,12 +766,12 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 				type_t = rbusValue_GetType(paramValue_t);
 				paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
 				WalInfo("Response paramValue is %s\n", paramValue);
-				(*paramArr)[0] = (param_t *) malloc(sizeof(param_t));
+				(*paramArr)[i] = (param_t *) malloc(sizeof(param_t));
 				WalInfo("Framing paramArr\n");
-				(*paramArr)[0][0].name = rbusProperty_GetName(props);
-				(*paramArr)[0][0].value = paramValue;
-				(*paramArr)[0][0].type = mapRbusToWdmpDataType(type_t);
-				WalInfo("success: %s %s %d \n",(*paramArr)[0][0].name,(*paramArr)[0][0].value, (*paramArr)[0][0].type);
+				(*paramArr)[i][0].name = strdup(rbusProperty_GetName(next));
+				(*paramArr)[i][0].value = strdup(paramValue); //free paramValue
+				(*paramArr)[i][0].type = mapRbusToWdmpDataType(type_t);
+				WalInfo("success: %s %s %d \n",(*paramArr)[i][0].name,(*paramArr)[i][0].value, (*paramArr)[i][0].type);
 				*retValCount = resCount;
 				*retStatus = (int)rc;
 
@@ -772,8 +780,10 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 			{
 				WalError("Parameter value from rbus_getExt is empty\n");
 			}
+			next = rbusProperty_GetNext(next);
 		}
-
+		WalInfo("rbusProperty_Release\n");
+		rbusProperty_Release(props);
 	}
 	WalInfo("getValues_rbus End\n");
 }
