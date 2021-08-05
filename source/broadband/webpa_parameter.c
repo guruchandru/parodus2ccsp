@@ -48,6 +48,7 @@ static void identifyRadioIndexToReset(int paramCount, parameterValStruct_t* val,
 BOOL applySettingsFlag;
 int rbusToCcspErrorMap(int rbusErr);
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus);
+static rbusValueType_t mapWdmpToRbusDataType(DATA_TYPE wdmpType);
 
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
@@ -399,11 +400,18 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 		rbusValue_Init(&setVal[i]);
 
 		setNames[i] = paramVal[i].name;
+		WalInfo("The param name to be set is %s\n", paramVal[i].name);
 
-		rbusValue_SetString(setVal[i], paramVal[i].value);
+		/* Get Param Type */
+		rbusValueType_t type = mapWdmpToRbusDataType(paramVal[i].type);
+
+		rbusValue_SetFromString(setVal[i], type, paramVal[i].value);
 
 		rbusProperty_t next;
 		rbusProperty_Init(&next, setNames[i], setVal[i]);
+
+		WalInfo("The property Name[%d] is %s\n", i, rbusProperty_GetName(next));
+		WalInfo("The value type[%d] is %d\n", i, rbusValue_GetType(setVal[i]));
 
 		 if(properties == NULL)
 		{
@@ -418,17 +426,69 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 
 	ret = rbus_setMulti(rbus_handle, paramCount, properties, NULL);
 
+	WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+
 	**ccspRetStatus = rbusToCcspErrorMap((int)ret);
 	WalInfo("ccspRetStatus is %d\n", **ccspRetStatus);
 
         **retStatus = mapStatus(**ccspRetStatus);
 
 	/* free the memory that was allocated */
+	WalInfo("Before free\n");
+	WalInfo("paramCount is %d\n", paramCount);
         for (i = 0; i < paramCount; i++)
         {
             rbusValue_Release(setVal[i]);
         }
+	WalInfo("After Value free\n");
         rbusProperty_Release(properties);
+	WalInfo("After properties free\n");
+}
+
+static rbusValueType_t mapWdmpToRbusDataType(DATA_TYPE wdmpType)
+{
+	DATA_TYPE rbusType = RBUS_NONE;
+
+	switch (wdmpType)
+	{
+		case WDMP_INT:
+			rbusType = RBUS_INT32;
+			break;
+		case WDMP_UINT:
+			rbusType = RBUS_UINT32;
+			break;
+		case WDMP_LONG:
+			rbusType = RBUS_INT64;
+			break;
+		case WDMP_ULONG:
+			rbusType = RBUS_UINT64;
+			break;
+		case WDMP_FLOAT:
+			rbusType = RBUS_SINGLE;
+			break;
+		case WDMP_DOUBLE:
+			rbusType = RBUS_DOUBLE;
+			break;
+		case WDMP_DATETIME:
+			rbusType = RBUS_DATETIME;
+			break;
+		case WDMP_BOOLEAN:
+			rbusType = RBUS_BOOLEAN;
+			break;
+		case WDMP_STRING:
+			rbusType = RBUS_STRING;
+			break;
+		case WDMP_BYTE:
+			rbusType = RBUS_BYTES;
+			break;
+		case WDMP_NONE:
+		default:
+			rbusType = RBUS_NONE;
+			break;
+	}
+
+	WalInfo("mapWdmpToRbusDataType : rbusType is %d\n", rbusType);
+	return rbusType;
 }
 
 int rbusToCcspErrorMap(int rbusErr)
