@@ -730,6 +730,11 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	rbusProperty_t props = NULL;
 	char* paramValue = NULL;
 	int i =0;
+	int val_size = 0;
+	int startIndex = 0;
+	rbusValue_t paramValue_t = NULL;
+	rbusValueType_t type_t;
+	int cnt=0;
 
 	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
 
@@ -755,32 +760,97 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	if(props)
 	{
 		rbusProperty_t next = props;
-		for (i = 0; i < resCount; i++)
+		val_size = resCount;
+		WalInfo("val_size : %d\n",val_size);
+		if(val_size > 0)
 		{
-			WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
-			rbusValue_t paramValue_t = rbusProperty_GetValue(next);
-			rbusValueType_t type_t;
-
-			if(paramValue_t)
+			if(paramCount == val_size)// && (parameterNamesLocal[0][strlen(parameterNamesLocal[0])-1] != '.'))
 			{
-				type_t = rbusValue_GetType(paramValue_t);
-				paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
-				WalInfo("Response paramValue is %s\n", paramValue);
-				(*paramArr)[i] = (param_t *) malloc(sizeof(param_t));
-				WalInfo("Framing paramArr\n");
-				(*paramArr)[i][0].name = strdup(rbusProperty_GetName(next));
-				(*paramArr)[i][0].value = strdup(paramValue); //free paramValue
-				(*paramArr)[i][0].type = mapRbusToWdmpDataType(type_t);
-				WalInfo("success: %s %s %d \n",(*paramArr)[i][0].name,(*paramArr)[i][0].value, (*paramArr)[i][0].type);
-				*retValCount = resCount;
-				*retStatus = (int)rc;
+				for (i = 0; i < resCount; i++)
+				{
+					WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
+					paramValue_t = rbusProperty_GetValue(next);
 
+					if(paramValue_t)
+					{
+						type_t = rbusValue_GetType(paramValue_t);
+						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
+						WalInfo("Response paramValue is %s\n", paramValue);
+						(*paramArr)[i] = (param_t *) malloc(sizeof(param_t));
+						WalInfo("Framing paramArr\n");
+						(*paramArr)[i][0].name = strdup(rbusProperty_GetName(next));
+						(*paramArr)[i][0].value = strdup(paramValue);
+						(*paramArr)[i][0].type = mapRbusToWdmpDataType(type_t);
+						WalInfo("success: %s %s %d \n",(*paramArr)[i][0].name,(*paramArr)[i][0].value, (*paramArr)[i][0].type);
+						*retValCount = resCount;
+						*retStatus = (int)rc;
+						if(paramValue !=NULL)
+						{
+							WAL_FREE(paramValue);
+						}
+					}
+					else
+					{
+						WalError("Parameter value from rbus_getExt is empty\n");
+					}
+					next = rbusProperty_GetNext(next);
+				}
 			}
 			else
 			{
-				WalError("Parameter value from rbus_getExt is empty\n");
+				WalInfo("Wildcard response\n");
+
+				if(startIndex == 0)
+				{
+					WalInfo("Single dest component wildcard\n");
+					(*paramArr)[i] = (param_t *) malloc(sizeof(param_t)*val_size);
+				}
+				else
+				{
+					WalInfo("Multi dest components wild card\n");
+					(*paramArr)[i] = (param_t *) realloc((*paramArr)[i], sizeof(param_t)*(startIndex + val_size));
+				}
+
+				for (cnt = 0; cnt < val_size; cnt++)
+				{
+					//WalInfo("Stack:> success: %s %s %d \n",parameterval[cnt][0].parameterName,parameterval[cnt][0].parameterValue, parameterval[cnt][0].type);
+					//IndexMpa_CPEtoWEBPA(&parameterval[cnt][0].parameterName);
+					//IndexMpa_CPEtoWEBPA(&parameterval[cnt][0].parameterValue);
+
+					WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
+					paramValue_t = rbusProperty_GetValue(next);
+
+					if(paramValue_t)
+					{
+						type_t = rbusValue_GetType(paramValue_t);
+						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
+						WalInfo("Response paramValue is %s\n", paramValue);
+
+						WalInfo("Framing paramArr\n");
+						(*paramArr)[i][cnt+startIndex].name = strdup(rbusProperty_GetName(next));
+						(*paramArr)[i][cnt+startIndex].value = strdup(paramValue);
+						(*paramArr)[i][cnt+startIndex].type = mapRbusToWdmpDataType(type_t);
+						WalInfo("success: %s %s %d \n",(*paramArr)[i][cnt+startIndex].name,(*paramArr)[i][cnt+startIndex].value, (*paramArr)[i][cnt+startIndex].type);
+						*retValCount = resCount;
+						*retStatus = (int)rc;
+						if(paramValue !=NULL)
+						{
+							WAL_FREE(paramValue);
+						}
+					}
+					next = rbusProperty_GetNext(next);
+					//
+					//WalInfo("B4 assignment\n");
+					//(*paramArr)[paramIndex][cnt+startIndex].name = parameterval[cnt][0].parameterName;
+					//(*paramArr)[paramIndex][cnt+startIndex].value = parameterval[cnt][0].parameterValue;
+					//(*paramArr)[paramIndex][cnt+startIndex].type = parameterval[cnt][0].type;
+					//WalInfo("success: %s %s %d \n",(*paramArr)[paramIndex][cnt+startIndex].name,(*paramArr)[paramIndex][cnt+startIndex].value, (*paramArr)[paramIndex][cnt+startIndex].type);
+				}
 			}
-			next = rbusProperty_GetNext(next);
+		}
+		else if(val_size == 0 && rc == RBUS_ERROR_SUCCESS)
+		{
+			WalInfo("No child elements found\n");
 		}
 		WalInfo("rbusProperty_Release\n");
 		rbusProperty_Release(props);
