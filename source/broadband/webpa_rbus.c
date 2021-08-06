@@ -729,12 +729,16 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	rbusError_t rc;
 	rbusProperty_t props = NULL;
 	char* paramValue = NULL;
+	char *pName = NULL;
 	int i =0;
 	int val_size = 0;
 	int startIndex = 0;
 	rbusValue_t paramValue_t = NULL;
 	rbusValueType_t type_t;
 	int cnt=0;
+	int retIndex=0;
+	int error = 0;
+	int ret = 0;
 
 	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
 
@@ -742,7 +746,43 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	{
 		WalInfo("rbus_getExt paramName[%d] : %s paramCount %d\n",cnt1,paramName[cnt1], paramCount);
 		//walStrncpy(parameterName,paramName[cnt1],sizeof(parameterName));
+		retIndex=IndexMpa_WEBPAtoCPE(paramName[cnt1]);
+		if(retIndex == -1)
+		{
+			if(strstr(paramName[cnt1], PARAM_RADIO_OBJECT) != NULL)
+			{
+				ret = CCSP_ERR_INVALID_RADIO_INDEX; //need to return rbus error
+				WalError("%s has invalid Radio index, Valid indexes are 10000 and 10100. ret = %d\n", paramName[cnt1],ret);
+				//OnboardLog("%s has invalid Radio index, Valid indexes are 10000 and 10100. ret = %d\n", paramName[cnt1],ret);
+			}
+			else
+			{
+				ret = CCSP_ERR_INVALID_WIFI_INDEX;
+				WalError("%s has invalid WiFi index, Valid range is between 10001-10008 and 10101-10108. ret = %d\n",paramName[cnt1], ret);
+				//OnboardLog("%s has invalid WiFi index, Valid range is between 10001-10008 and 10101-10108. ret = %d\n",paramName[cnt1], ret);
+			}
+			error = 1;
+			break;
+		}
+
+		WalInfo("After mapping paramName[%d] : %s\n",cnt1,paramName[cnt1]);
+
 	}
+	if(error == 1)
+	{
+		WalError("error 1. returning ret %d\n", ret);
+		/*for (cnt1 = 0; cnt1 < paramCount; cnt1++)
+		{
+			WAL_FREE(paramName[cnt1]);
+		}
+		WalError("Free paramName\n");
+		WAL_FREE(paramName);*/
+		WalError("*retstatus\n");
+		*retStatus = ret;
+		WalError("*retStatus returning %d\n", *retStatus);
+		return;
+	}
+
 	if(!rbus_handle)
 	{
 		WalError("getValues_rbus Failed as rbus_handle is not initialized\n");
@@ -776,17 +816,26 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 						type_t = rbusValue_GetType(paramValue_t);
 						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
 						WalInfo("Response paramValue is %s\n", paramValue);
+						pName = strdup(rbusProperty_GetName(next));
 						(*paramArr)[i] = (param_t *) malloc(sizeof(param_t));
+
+						IndexMpa_CPEtoWEBPA(&pName);
+						IndexMpa_CPEtoWEBPA(&paramValue);
+
 						WalInfo("Framing paramArr\n");
-						(*paramArr)[i][0].name = strdup(rbusProperty_GetName(next));
+						(*paramArr)[i][0].name = strdup(pName);
 						(*paramArr)[i][0].value = strdup(paramValue);
 						(*paramArr)[i][0].type = mapRbusToWdmpDataType(type_t);
 						WalInfo("success: %s %s %d \n",(*paramArr)[i][0].name,(*paramArr)[i][0].value, (*paramArr)[i][0].type);
 						*retValCount = resCount;
-						*retStatus = (int)rc;
+						*retStatus = mapRbusStatus(rc);
 						if(paramValue !=NULL)
 						{
 							WAL_FREE(paramValue);
+						}
+						if(pName !=NULL)
+						{
+							WAL_FREE(pName);
 						}
 					}
 					else
@@ -825,17 +874,25 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 						type_t = rbusValue_GetType(paramValue_t);
 						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
 						WalInfo("Response paramValue is %s\n", paramValue);
+						pName = strdup(rbusProperty_GetName(next));
+
+						IndexMpa_CPEtoWEBPA(&pName);
+						IndexMpa_CPEtoWEBPA(&paramValue);
 
 						WalInfo("Framing paramArr\n");
-						(*paramArr)[i][cnt+startIndex].name = strdup(rbusProperty_GetName(next));
+						(*paramArr)[i][cnt+startIndex].name = strdup(pName);
 						(*paramArr)[i][cnt+startIndex].value = strdup(paramValue);
 						(*paramArr)[i][cnt+startIndex].type = mapRbusToWdmpDataType(type_t);
 						WalInfo("success: %s %s %d \n",(*paramArr)[i][cnt+startIndex].name,(*paramArr)[i][cnt+startIndex].value, (*paramArr)[i][cnt+startIndex].type);
 						*retValCount = resCount;
-						*retStatus = (int)rc;
+						*retStatus = mapRbusStatus(rc);
 						if(paramValue !=NULL)
 						{
 							WAL_FREE(paramValue);
+						}
+						if(pName !=NULL)
+						{
+							WAL_FREE(pName);
 						}
 					}
 					next = rbusProperty_GetNext(next);

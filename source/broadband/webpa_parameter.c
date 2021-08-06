@@ -71,11 +71,11 @@ void getValues(const char *paramName[], const unsigned int paramCount, int index
 	WalInfo("After getValues_rbus\n");
 	WalInfo("totalParams is %d ret %d\n", totalParams, ret);
 	retValCount[0] = totalParams;
-	WalInfo("map rbus error code to ccsp error code\n");
-	ccspStatus = mapRbusStatus(ret);
-	WalInfo("ccspStatus mapped is %d\n", ccspStatus);
-	*retStatus = mapStatus(ccspStatus);
-	WalInfo("wdmp *retStatus is %d\n", *retStatus);
+	//WalInfo("map rbus error code to ccsp error code\n");
+	//ccspStatus = mapRbusStatus(ret);
+	//WalInfo("ccspStatus mapped is %d\n", ccspStatus);
+	*retStatus = mapStatus(ret);
+	WalInfo("wdmp retStatus is %d\n", *retStatus);
 	return;
     }
 
