@@ -405,16 +405,16 @@ void processRequest(char *reqPayload,char *transactionId, char **resPayload)
                         
                         case DELETE_ROW:
                         {
-                                WalPrint("Request:> ParamCount = %zu\n",reqObj->u.tableReq->rowCnt);
+                                WalInfo("Request:> ParamCount = %zu\n",reqObj->u.tableReq->rowCnt);
                                 resObj->paramCnt = reqObj->u.tableReq->rowCnt;
-                                WalPrint("Response:> paramCnt = %zu\n", resObj->paramCnt);
+                                WalInfo("Response:> paramCnt = %zu\n", resObj->paramCnt);
 				if(resObj->paramCnt == 0)
 					resObj->retStatus = (WDMP_STATUS *) malloc(sizeof(WDMP_STATUS)*1);
 				else
                                 	resObj->retStatus = (WDMP_STATUS *) malloc(sizeof(WDMP_STATUS)*resObj->paramCnt);
 
                                 resObj->timeSpan = NULL;
-                                WalPrint("Request:> Object Name = %s\n",reqObj->u.tableReq->objectName);
+                                WalInfo("Request:> Object Name = %s\n",reqObj->u.tableReq->objectName);
 
                                 ret = validate_table_object(reqObj->u.tableReq);
                                 if(ret == WDMP_SUCCESS)
@@ -425,9 +425,9 @@ void processRequest(char *reqPayload,char *transactionId, char **resPayload)
                                 {
                                         WalError("Table object validations failed\n");
                                 }
-                                WalPrint("Response:> ret = %d\n",ret);
+                                WalInfo("Response:> ret = %d\n",ret);
                                 *resObj->retStatus = ret;
-                                WalPrint("Response:> retStatus = %d\n", *resObj->retStatus);
+                                WalInfo("Response:> retStatus = %d\n", *resObj->retStatus);
                         }
                         break;
                         

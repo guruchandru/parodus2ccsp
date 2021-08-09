@@ -995,3 +995,28 @@ DATA_TYPE mapRbusToWdmpDataType(rbusValueType_t rbusType)
 	WalInfo("mapRbusToWdmpDataType : wdmp_type is %d\n", wdmp_type);
 	return wdmp_type;
 }
+
+int deleteRow_rbus(char *object)
+{
+	int ret = 0;
+	rbusError_t rc;
+
+	WalInfo("deleteRow_rbus object: %s\n", object);
+	rc = rbusTable_removeRow(rbus_handle,object);
+	WalInfo("rc = %d\n",rc);
+
+	if ( rc == CCSP_SUCCESS )
+	{
+		WalInfo("Execution succeed.\n");
+		WalInfo("%s is deleted.\n", object);
+	}
+	else
+	{
+		WalError("Execution fail ret :%d\n", rc);
+	}
+	ret = rc;
+	//ret = mapRbusStatus(rc);
+	WalInfo("ret = %d\n",ret);
+	WalInfo("<==========End of deleteRow rbus========>\n");
+	return ret;
+}

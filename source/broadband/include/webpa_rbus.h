@@ -58,4 +58,5 @@ rbusError_t rbus_StoreValueIntoDB(char *paramName, char *value);
 
 void getValues_rbus(const char *paramName[], const unsigned int paramCount, int index, money_trace_spans *timeSpan, param_t ***paramArr, int *retValCount, int *retStatus);
 DATA_TYPE mapRbusToWdmpDataType(rbusValueType_t rbusType);
+int deleteRow_rbus(char *object);
 #endif
