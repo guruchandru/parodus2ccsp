@@ -20,6 +20,7 @@
 /*                                   Macros                                   */
 /*----------------------------------------------------------------------------*/
 #define RDKB_WEBPA_FULL_COMPONENT_NAME      "eRT.com.cisco.spvtg.ccsp.webpaagent"
+#define RBUS_CLI_COMPONENT_NAME              "rbuscli"
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
 /*----------------------------------------------------------------------------*/
@@ -33,6 +34,7 @@ BOOL bRestartRadio2 = FALSE;
 pthread_mutex_t applySetting_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t applySetting_cond = PTHREAD_COND_INITIALIZER;
 static char current_transaction_id[MAX_PARAMETERVALUE_LEN] = {'\0'};
+rbusHandle_t   g_busHandle = 0;
 
 /*----------------------------------------------------------------------------*/
 /*                             Function Prototypes                            */
@@ -49,7 +51,26 @@ BOOL applySettingsFlag;
 int rbusToCcspErrorMap(int rbusErr);
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus);
 static rbusValueType_t mapWdmpToRbusDataType(DATA_TYPE wdmpType);
-
+static bool verify_rbus_open();
+/*----------------------------------------------------------------------------*/
+/*                             Internal Functions                             */
+/*----------------------------------------------------------------------------*/
+static bool verify_rbus_open()
+{
+    if(!g_busHandle)
+    {
+        rbusError_t rc;
+        char compName[50] = "";
+        snprintf(compName, 50, "%s-%d", RBUS_CLI_COMPONENT_NAME, getpid());
+        rc = rbus_open(&g_busHandle, compName);
+        if(rc != RBUS_ERROR_SUCCESS)
+        {
+            printf("rbus_open failed err: %d\n\r", rc);
+            return false;
+        }
+    }
+    return true;
+}
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
@@ -388,12 +409,18 @@ void setValues(const param_t paramVal[], const unsigned int paramCount, const in
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus)
 {
 	int i = 0;
+	int isInvalid = 0;
+	bool isCommit = true;
+	int sessionId = 0;
 	rbusError_t ret = RBUS_ERROR_BUS_ERROR;
 	rbusProperty_t properties = NULL, last = NULL;
 	rbusValue_t setVal[paramCount];
 	char const* setNames[paramCount];
 
-	rbusHandle_t rbus_handle = get_global_rbus_handle();
+	//rbusHandle_t rbus_handle = get_global_rbus_handle();
+
+	if (!verify_rbus_open())
+        return;
 
 	for(i=0; i<paramCount; i++)
 	{
@@ -404,6 +431,13 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 
 		/* Get Param Type */
 		rbusValueType_t type = mapWdmpToRbusDataType(paramVal[i].type);
+
+		if (type == RBUS_NONE)
+		{
+			WalError("Invalid data type. Please see the help\n\r");
+			isInvalid = 1;
+			break;
+		}
 
 		rbusValue_SetFromString(setVal[i], type, paramVal[i].value);
 
@@ -424,9 +458,21 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 		}
 	}
 
-	ret = rbus_setMulti(rbus_handle, paramCount, properties, NULL);
+	if(!isInvalid)
+	{
+		isCommit = true;
+		sessionId = 0;
 
-	WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+		rbusSetOptions_t opts = {isCommit,sessionId};
+
+		ret = rbus_setMulti(g_busHandle, paramCount, properties, &opts);
+		WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+	}
+	else
+	{
+		ret = RBUS_ERROR_INVALID_INPUT;
+		WalError("The Type is invalid so not proceeding further\n");
+	}
 
 	**ccspRetStatus = rbusToCcspErrorMap((int)ret);
 	WalInfo("ccspRetStatus is %d\n", **ccspRetStatus);
@@ -501,6 +547,8 @@ int rbusToCcspErrorMap(int rbusErr)
 			return CCSP_FAILURE;
 		case RBUS_ERROR_TIMEOUT:
 			return CCSP_ERR_TIMEOUT;
+		case RBUS_ERROR_INVALID_INPUT:
+			return CCSP_ERR_INVALID_PARAMETER_VALUE;
 		/*case CCSP_ERR_NOT_EXIST:
 			return WDMP_ERR_NOT_EXIST;
 		case CCSP_ERR_INVALID_PARAMETER_NAME:
