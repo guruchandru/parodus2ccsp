@@ -739,6 +739,9 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 	int retIndex=0;
 	int error = 0;
 	int ret = 0;
+	int numComponents = 0;
+	char **componentName = NULL;
+	int compRet = 0;
 
 	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
 
@@ -768,6 +771,40 @@ void getValues_rbus(const char *paramName[], const unsigned int paramCount, int 
 		WalInfo("After mapping paramName[%d] : %s\n",cnt1,paramName[cnt1]);
 
 	}
+
+	//disc component
+	for(cnt1 = 0; cnt1 < paramCount; cnt1++)
+	{
+		WalInfo("paramName[%d] : %s\n",cnt1,paramName[cnt1]);
+
+		rc = rbus_discoverComponentName(rbus_handle,paramCount,paramName,&numComponents,&componentName);
+		WalInfo("rc is %d\n", rc);
+		if(RBUS_ERROR_SUCCESS == rc)
+		{
+			WalInfo ("Discovered components are,\n");
+			for(i=0;i<numComponents;i++)
+			{
+				WalInfo("rbus_discoverComponentName %s: %s\n", paramName[i],componentName[i]);
+				//free(componentName[i]);
+			}
+			//free(componentName);
+		}
+		else
+		{
+			WalError ("Failed to discover component array. Error Code = %d\n", rc);
+		}
+
+		compRet = 1;
+	}
+
+	//testing.
+	if(compRet == 1)
+	{
+		*retStatus = mapRbusStatus(rc);
+		WalError("disc comp *retStatus returning %d\n", *retStatus);
+		return;
+	}
+
 	if(error == 1)
 	{
 		WalError("error 1. returning ret %d\n", ret);
