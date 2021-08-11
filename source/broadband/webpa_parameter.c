@@ -388,6 +388,9 @@ void setValues(const param_t paramVal[], const unsigned int paramCount, const in
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus)
 {
 	int i = 0;
+	int isInvalid = 0;
+	bool isCommit = true;
+	int sessionId = 0;
 	rbusError_t ret = RBUS_ERROR_BUS_ERROR;
 	rbusProperty_t properties = NULL, last = NULL;
 	rbusValue_t setVal[paramCount];
@@ -404,6 +407,13 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 
 		/* Get Param Type */
 		rbusValueType_t type = mapWdmpToRbusDataType(paramVal[i].type);
+
+		if (type == RBUS_NONE)
+		{
+			WalError("Invalid data type. Please see the help\n\r");
+			isInvalid = 1;
+			break;
+		}
 
 		rbusValue_SetFromString(setVal[i], type, paramVal[i].value);
 
@@ -424,9 +434,21 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 		}
 	}
 
-	ret = rbus_setMulti(rbus_handle, paramCount, properties, NULL);
+	if(!isInvalid)
+	{
+		isCommit = true;
+		sessionId = 0;
 
-	WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+		rbusSetOptions_t opts = {isCommit,sessionId};
+
+		ret = rbus_setMulti(rbus_handle, paramCount, properties, &opts);
+		WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+	}
+	else
+	{
+		ret = RBUS_ERROR_INVALID_INPUT;
+		WalError("The Type is invalid so not proceeding further\n");
+	}
 
 	**ccspRetStatus = rbusToCcspErrorMap((int)ret);
 	WalInfo("ccspRetStatus is %d\n", **ccspRetStatus);
@@ -501,6 +523,8 @@ int rbusToCcspErrorMap(int rbusErr)
 			return CCSP_FAILURE;
 		case RBUS_ERROR_TIMEOUT:
 			return CCSP_ERR_TIMEOUT;
+		case RBUS_ERROR_INVALID_INPUT:
+			return CCSP_ERR_INVALID_PARAMETER_VALUE;
 		/*case CCSP_ERR_NOT_EXIST:
 			return WDMP_ERR_NOT_EXIST;
 		case CCSP_ERR_INVALID_PARAMETER_NAME:
