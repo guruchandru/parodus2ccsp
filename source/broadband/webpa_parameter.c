@@ -439,6 +439,20 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 			break;
 		}
 
+		if(type == RBUS_BOOLEAN)
+		{
+			if(strncmp(paramVal[i].value,"true",4)==0 || strncmp(paramVal[i].value,"false",5)==0)
+			{
+				WalInfo("The bool value and data type are correct\n");
+			}
+			else
+			{
+				WalError("Invalid data type. Please see the help\n\r");
+				isInvalid = 1;
+				break;
+			}
+		}
+
 		rbusValue_SetFromString(setVal[i], type, paramVal[i].value);
 
 		rbusProperty_t next;
