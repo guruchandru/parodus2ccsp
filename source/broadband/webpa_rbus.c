@@ -721,3 +721,339 @@ WDMP_STATUS regWebpaDataModel()
 	WalInfo("rbus reg status returned is %d\n", status);
 	return status;
 }
+
+void getValues_rbus(const char *paramName[], const unsigned int paramCount, int index, money_trace_spans *timeSpan, param_t ***paramArr, int *retValCount, int *retStatus)
+{
+	int cnt1=0;
+	int resCount = 0;
+	rbusError_t rc;
+	rbusProperty_t props = NULL;
+	char* paramValue = NULL;
+	char *pName = NULL;
+	int i =0;
+	int val_size = 0;
+	int startIndex = 0;
+	rbusValue_t paramValue_t = NULL;
+	rbusValueType_t type_t;
+	int cnt=0;
+	int retIndex=0;
+	int error = 0;
+	int ret = 0;
+	int numComponents = 0;
+	char **componentName = NULL;
+	int compRet = 0;
+
+	char parameterName[MAX_PARAMETERNAME_LEN] = {'\0'};
+
+	for(cnt1 = 0; cnt1 < paramCount; cnt1++)
+	{
+		WalInfo("rbus_getExt paramName[%d] : %s paramCount %d\n",cnt1,paramName[cnt1], paramCount);
+		//walStrncpy(parameterName,paramName[cnt1],sizeof(parameterName));
+		retIndex=IndexMpa_WEBPAtoCPE(paramName[cnt1]);
+		if(retIndex == -1)
+		{
+			if(strstr(paramName[cnt1], PARAM_RADIO_OBJECT) != NULL)
+			{
+				ret = CCSP_ERR_INVALID_RADIO_INDEX; //need to return rbus error
+				WalError("%s has invalid Radio index, Valid indexes are 10000 and 10100. ret = %d\n", paramName[cnt1],ret);
+				//OnboardLog("%s has invalid Radio index, Valid indexes are 10000 and 10100. ret = %d\n", paramName[cnt1],ret);
+			}
+			else
+			{
+				ret = CCSP_ERR_INVALID_WIFI_INDEX;
+				WalError("%s has invalid WiFi index, Valid range is between 10001-10008 and 10101-10108. ret = %d\n",paramName[cnt1], ret);
+				//OnboardLog("%s has invalid WiFi index, Valid range is between 10001-10008 and 10101-10108. ret = %d\n",paramName[cnt1], ret);
+			}
+			error = 1;
+			break;
+		}
+
+		WalInfo("After mapping paramName[%d] : %s\n",cnt1,paramName[cnt1]);
+
+	}
+
+	//disc component
+	for(cnt1 = 0; cnt1 < paramCount; cnt1++)
+	{
+		WalInfo("paramName[%d] : %s\n",cnt1,paramName[cnt1]);
+
+		rc = rbus_discoverComponentName(rbus_handle,paramCount,paramName,&numComponents,&componentName);
+		WalInfo("rc is %d\n", rc);
+		if(RBUS_ERROR_SUCCESS == rc)
+		{
+			WalInfo ("Discovered components are,\n");
+			for(i=0;i<numComponents;i++)
+			{
+				WalInfo("rbus_discoverComponentName %s: %s\n", paramName[i],componentName[i]);
+				//free(componentName[i]);
+			}
+			//free(componentName);
+		}
+		else
+		{
+			WalError ("Failed to discover component array. Error Code = %d\n", rc);
+		}
+
+		compRet = 1;
+	}
+
+	//testing.
+	if(compRet == 1)
+	{
+		*retStatus = mapRbusStatus(rc);
+		WalError("disc comp *retStatus returning %d\n", *retStatus);
+		return;
+	}
+
+	if(error == 1)
+	{
+		WalError("error 1. returning ret %d\n", ret);
+		/*for (cnt1 = 0; cnt1 < paramCount; cnt1++)
+		{
+			WAL_FREE(paramName[cnt1]);
+		}
+		WalError("Free paramName\n");
+		WAL_FREE(paramName);*/
+		WalError("*retstatus\n");
+		*retStatus = ret;
+		WalError("*retStatus returning %d\n", *retStatus);
+		return;
+	}
+
+	if(!rbus_handle)
+	{
+		WalError("getValues_rbus Failed as rbus_handle is not initialized\n");
+		return;
+	}
+	rc = rbus_getExt(rbus_handle, paramCount, paramName, &resCount, &props);
+	WalInfo("After rbus_getExt\n");
+
+	WalInfo("rbus_getExt rc=%d resCount=%d\n", rc, resCount);
+
+	if(RBUS_ERROR_SUCCESS != rc)
+	{
+		WalError("Failed to get value\n");
+	}
+	if(props)
+	{
+		rbusProperty_t next = props;
+		val_size = resCount;
+		WalInfo("val_size : %d\n",val_size);
+		if(val_size > 0)
+		{
+			if(paramCount == val_size)// && (parameterNamesLocal[0][strlen(parameterNamesLocal[0])-1] != '.'))
+			{
+				for (i = 0; i < resCount; i++)
+				{
+					WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
+					paramValue_t = rbusProperty_GetValue(next);
+
+					if(paramValue_t)
+					{
+						type_t = rbusValue_GetType(paramValue_t);
+						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
+						WalInfo("Response paramValue is %s\n", paramValue);
+						pName = strdup(rbusProperty_GetName(next));
+						(*paramArr)[i] = (param_t *) malloc(sizeof(param_t));
+
+						IndexMpa_CPEtoWEBPA(&pName);
+						IndexMpa_CPEtoWEBPA(&paramValue);
+
+						WalInfo("Framing paramArr\n");
+						(*paramArr)[i][0].name = strdup(pName);
+						(*paramArr)[i][0].value = strdup(paramValue);
+						(*paramArr)[i][0].type = mapRbusToWdmpDataType(type_t);
+						WalInfo("success: %s %s %d \n",(*paramArr)[i][0].name,(*paramArr)[i][0].value, (*paramArr)[i][0].type);
+						*retValCount = resCount;
+						*retStatus = mapRbusStatus(rc);
+						if(paramValue !=NULL)
+						{
+							WAL_FREE(paramValue);
+						}
+						if(pName !=NULL)
+						{
+							WAL_FREE(pName);
+						}
+					}
+					else
+					{
+						WalError("Parameter value from rbus_getExt is empty\n");
+					}
+					next = rbusProperty_GetNext(next);
+				}
+			}
+			else
+			{
+				WalInfo("Wildcard response\n");
+
+				if(startIndex == 0)
+				{
+					WalInfo("Single dest component wildcard\n");
+					(*paramArr)[i] = (param_t *) malloc(sizeof(param_t)*val_size);
+				}
+				else
+				{
+					WalInfo("Multi dest components wild card\n");
+					(*paramArr)[i] = (param_t *) realloc((*paramArr)[i], sizeof(param_t)*(startIndex + val_size));
+				}
+
+				for (cnt = 0; cnt < val_size; cnt++)
+				{
+					//WalInfo("Stack:> success: %s %s %d \n",parameterval[cnt][0].parameterName,parameterval[cnt][0].parameterValue, parameterval[cnt][0].type);
+					//IndexMpa_CPEtoWEBPA(&parameterval[cnt][0].parameterName);
+					//IndexMpa_CPEtoWEBPA(&parameterval[cnt][0].parameterValue);
+
+					WalInfo("Response Param is %s\n", rbusProperty_GetName(next));
+					paramValue_t = rbusProperty_GetValue(next);
+
+					if(paramValue_t)
+					{
+						type_t = rbusValue_GetType(paramValue_t);
+						paramValue = rbusValue_ToString(paramValue_t, NULL, 0);
+						WalInfo("Response paramValue is %s\n", paramValue);
+						pName = strdup(rbusProperty_GetName(next));
+
+						IndexMpa_CPEtoWEBPA(&pName);
+						IndexMpa_CPEtoWEBPA(&paramValue);
+
+						WalInfo("Framing paramArr\n");
+						(*paramArr)[i][cnt+startIndex].name = strdup(pName);
+						(*paramArr)[i][cnt+startIndex].value = strdup(paramValue);
+						(*paramArr)[i][cnt+startIndex].type = mapRbusToWdmpDataType(type_t);
+						WalInfo("success: %s %s %d \n",(*paramArr)[i][cnt+startIndex].name,(*paramArr)[i][cnt+startIndex].value, (*paramArr)[i][cnt+startIndex].type);
+						*retValCount = resCount;
+						*retStatus = mapRbusStatus(rc);
+						if(paramValue !=NULL)
+						{
+							WAL_FREE(paramValue);
+						}
+						if(pName !=NULL)
+						{
+							WAL_FREE(pName);
+						}
+					}
+					next = rbusProperty_GetNext(next);
+					//
+					//WalInfo("B4 assignment\n");
+					//(*paramArr)[paramIndex][cnt+startIndex].name = parameterval[cnt][0].parameterName;
+					//(*paramArr)[paramIndex][cnt+startIndex].value = parameterval[cnt][0].parameterValue;
+					//(*paramArr)[paramIndex][cnt+startIndex].type = parameterval[cnt][0].type;
+					//WalInfo("success: %s %s %d \n",(*paramArr)[paramIndex][cnt+startIndex].name,(*paramArr)[paramIndex][cnt+startIndex].value, (*paramArr)[paramIndex][cnt+startIndex].type);
+				}
+			}
+		}
+		else if(val_size == 0 && rc == RBUS_ERROR_SUCCESS)
+		{
+			WalInfo("No child elements found\n");
+		}
+		WalInfo("rbusProperty_Release\n");
+		rbusProperty_Release(props);
+	}
+	WalInfo("getValues_rbus End\n");
+}
+
+//To map Rbus error code to Ccsp error codes.
+int mapRbusStatus(int Rbus_error_code)
+{
+    int CCSP_error_code = CCSP_Msg_Bus_ERROR;
+    switch (Rbus_error_code)
+    {
+        case  0  : CCSP_error_code = CCSP_Msg_Bus_OK; break;
+        case  1  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  2  : CCSP_error_code = 9007; break;// CCSP_ERR_INVALID_PARAMETER_VALUE
+        case  3  : CCSP_error_code = CCSP_Msg_Bus_OOM; break;
+        case  4  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  5  : CCSP_error_code = CCSP_Msg_Bus_ERROR; break;
+        case  6  : CCSP_error_code = CCSP_Msg_BUS_TIMEOUT; break;
+        case  7  : CCSP_error_code = CCSP_Msg_BUS_TIMEOUT; break;
+        case  8  : CCSP_error_code = CCSP_ERR_UNSUPPORTED_PROTOCOL; break;
+        case  9  : CCSP_error_code = CCSP_Msg_BUS_NOT_SUPPORT; break;
+        case  10 : CCSP_error_code = CCSP_Msg_BUS_NOT_SUPPORT; break;
+        case  11 : CCSP_error_code = CCSP_Msg_Bus_OOM; break;
+        case  12 : CCSP_error_code = CCSP_Msg_BUS_CANNOT_CONNECT; break;
+    }
+    return CCSP_error_code;
+}
+
+//maps rbus rbusValueType_t to WDMP datatype
+DATA_TYPE mapRbusToWdmpDataType(rbusValueType_t rbusType)
+{
+	DATA_TYPE wdmp_type = WDMP_NONE;
+
+	switch (rbusType)
+	{
+		case RBUS_INT16:
+		case RBUS_INT32:
+			wdmp_type = WDMP_INT;
+			break;
+		case RBUS_UINT16:
+		case RBUS_UINT32:
+			wdmp_type = WDMP_UINT;
+			break;
+		case RBUS_INT64:
+			wdmp_type = WDMP_LONG;
+			break;
+		case RBUS_UINT64:
+			wdmp_type = WDMP_ULONG;
+			break;
+		case RBUS_SINGLE:
+			wdmp_type = WDMP_FLOAT;
+			break;
+		case RBUS_DOUBLE:
+			wdmp_type = WDMP_DOUBLE;
+			break;
+		case RBUS_DATETIME:
+			wdmp_type = WDMP_DATETIME;
+			break;
+		case RBUS_BOOLEAN:
+			wdmp_type = WDMP_BOOLEAN;
+			break;
+		case RBUS_CHAR:
+		case RBUS_INT8:
+			wdmp_type = WDMP_INT;
+			break;
+		case RBUS_UINT8:
+		case RBUS_BYTE:
+			wdmp_type = WDMP_UINT;
+			break;
+		case RBUS_STRING:
+			wdmp_type = WDMP_STRING;
+			break;
+		case RBUS_BYTES:
+			wdmp_type = WDMP_BYTE;
+			break;
+		case RBUS_PROPERTY:
+		case RBUS_OBJECT:
+		case RBUS_NONE:
+		default:
+			wdmp_type = WDMP_NONE;
+			break;
+	}
+	WalInfo("mapRbusToWdmpDataType : wdmp_type is %d\n", wdmp_type);
+	return wdmp_type;
+}
+
+int deleteRow_rbus(char *object)
+{
+	int ret = 0;
+	rbusError_t rc;
+
+	WalInfo("deleteRow_rbus object: %s\n", object);
+	rc = rbusTable_removeRow(rbus_handle,object);
+	WalInfo("rc = %d\n",rc);
+
+	if ( rc == CCSP_SUCCESS )
+	{
+		WalInfo("Execution succeed.\n");
+		WalInfo("%s is deleted.\n", object);
+	}
+	else
+	{
+		WalError("Execution fail ret :%d\n", rc);
+	}
+	ret = rc;
+	//ret = mapRbusStatus(rc);
+	WalInfo("ret = %d\n",ret);
+	WalInfo("<==========End of deleteRow rbus========>\n");
+	return ret;
+}

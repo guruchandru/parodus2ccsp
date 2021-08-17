@@ -31,6 +31,7 @@
 #include "webpa_adapter.h"
 #include <wdmp-c.h>
 #include <cimplog.h>
+#include <rbus/rbus.h>
 
 #define buffLen 1024
 #define maxParamLen 128
@@ -50,6 +51,15 @@
 #define WEBPA_CID_PARAM "Device.DeviceInfo.Webpa.X_COMCAST-COM_CID"
 #define WEBPA_SYNCVERSION_PARAM "Device.DeviceInfo.Webpa.X_COMCAST-COM_SyncProtocolVersion"
 
+#define CCSP_Msg_Bus_OK             100
+#define CCSP_Msg_Bus_OOM            101
+#define CCSP_Msg_Bus_ERROR          102
+
+#define CCSP_Msg_BUS_CANNOT_CONNECT 190
+#define CCSP_Msg_BUS_TIMEOUT        191
+#define CCSP_Msg_BUS_NOT_EXIST      192
+#define CCSP_Msg_BUS_NOT_SUPPORT    193
+
 bool isRbusEnabled();
 
 WDMP_STATUS webpaRbusInit(const char *pComponentName);
@@ -59,4 +69,7 @@ rbusHandle_t get_global_rbus_handle(void);
 rbusError_t rbus_GetValueFromDB( char* paramName, char** paramValue);
 rbusError_t rbus_StoreValueIntoDB(char *paramName, char *value);
 
+void getValues_rbus(const char *paramName[], const unsigned int paramCount, int index, money_trace_spans *timeSpan, param_t ***paramArr, int *retValCount, int *retStatus);
+DATA_TYPE mapRbusToWdmpDataType(rbusValueType_t rbusType);
+int deleteRow_rbus(char *object);
 #endif
