@@ -34,8 +34,6 @@ BOOL bRestartRadio2 = FALSE;
 pthread_mutex_t applySetting_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t applySetting_cond = PTHREAD_COND_INITIALIZER;
 static char current_transaction_id[MAX_PARAMETERVALUE_LEN] = {'\0'};
-rbusHandle_t   g_busHandle = 0;
-
 /*----------------------------------------------------------------------------*/
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
@@ -51,26 +49,7 @@ BOOL applySettingsFlag;
 int rbusToCcspErrorMap(int rbusErr);
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus);
 static rbusValueType_t mapWdmpToRbusDataType(DATA_TYPE wdmpType);
-static bool verify_rbus_open();
-/*----------------------------------------------------------------------------*/
-/*                             Internal Functions                             */
-/*----------------------------------------------------------------------------*/
-static bool verify_rbus_open()
-{
-    if(!g_busHandle)
-    {
-        rbusError_t rc;
-        char compName[50] = "";
-        snprintf(compName, 50, "%s-%d", RBUS_CLI_COMPONENT_NAME, getpid());
-        rc = rbus_open(&g_busHandle, compName);
-        if(rc != RBUS_ERROR_SUCCESS)
-        {
-            printf("rbus_open failed err: %d\n\r", rc);
-            return false;
-        }
-    }
-    return true;
-}
+
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
@@ -428,19 +407,98 @@ void setValues(const param_t paramVal[], const unsigned int paramCount, const in
 
 void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, const int setType,char **transactionId, money_trace_spans **timeSpan, WDMP_STATUS **retStatus, int **ccspRetStatus)
 {
-	int i = 0;
-	int isInvalid = 0;
+	int i, j, rbk = 0;
+	int cnt1=0;
+	int isInvalid, getFlag = 0;
+	int index, retCount = 0;
 	bool isCommit = true;
 	int sessionId = 0;
-	rbusError_t ret = RBUS_ERROR_BUS_ERROR;
+	rbusError_t ret, checkStatus = RBUS_ERROR_BUS_ERROR;
 	rbusProperty_t properties = NULL, last = NULL;
 	rbusValue_t setVal[paramCount];
 	char const* setNames[paramCount];
+/*
+	int numComponents = 0;
+	char **componentName = NULL;
+	int compRet = 0;*/
 
-	//rbusHandle_t rbus_handle = get_global_rbus_handle();
+	param_t **rollbackVal = NULL;
+	//param_t **storeGetValue = NULL;
 
-	if (!verify_rbus_open())
-        return;
+	rbusHandle_t rbus_handle = get_global_rbus_handle();
+
+	if(rbus_handle == NULL)
+	{
+		WalError("setValues_rbus Failed as rbus_handle is not initialized\n");
+		return;
+	}
+
+	/*for(cnt1 = 0; cnt1 < paramCount; cnt1++)
+	{
+		WalInfo("paramName[%d] : %s\n",cnt1,paramVal[cnt1].name);
+
+		ret = rbus_discoverComponentName(rbus_handle,paramCount,paramVal[cnt1].name, &numComponents,&componentName);
+		WalInfo("rc is %d\n", ret);
+		if(RBUS_ERROR_SUCCESS == ret)
+		{
+			WalInfo ("Discovered components are,\n");
+			for(i=0;i<numComponents;i++)
+			{
+				WalInfo("rbus_discoverComponentName %s: %s\n", paramVal[i].name,componentName[i]);
+				//free(componentName[i]);
+			}
+			//free(componentName);
+		}
+		else
+		{
+			WalError ("Failed to discover component array. Error Code = %d\n", ret);
+			compRet = 1;
+		}
+
+	}
+
+	if(compRet)
+	{
+		**ccspRetStatus = mapRbusStatus((int)ret);
+		WalError("disc comp *ccspRetStatus returning %d\n", **ccspRetStatus);;
+
+		**retStatus = mapStatus(**ccspRetStatus);
+		return;
+	}*/
+
+	rollbackVal = (param_t **) malloc(sizeof(param_t *) * paramCount);
+	memset(rollbackVal,0,(sizeof(param_t *) * paramCount));
+
+	/*storeGetValue = (param_t **)malloc(sizeof(param_t *) * paramCount);
+	memset(storeGetValue,0,(sizeof(param_t *) * paramCount));*/
+
+	for(j = 0; j<paramCount; j++)
+	{
+		getValues_rbus(paramVal[j].name, paramCount, index, timeSpan, &rollbackVal[j], &retCount, &ret);
+		WalInfo("After getValues_rbus index = %d , retCount =  %d\n",index,retCount);
+
+		if(ret != 0)
+		{
+			WalError("Get Atomic Values call failed for paramVal[%d].name :%s ret: %d\n", j, paramVal[j].name, ret);
+			getFlag = 1;
+		}
+	}
+
+	if(getFlag)
+	{
+		for(j = 0; j<paramCount; j++)
+		{
+			WAL_FREE(rollbackVal[j]->name);
+			WAL_FREE(rollbackVal[j]->value);
+			WAL_FREE(rollbackVal[j]);
+		}
+
+		**ccspRetStatus = mapRbusStatus(1);
+		WalInfo("ccspRetStatus is %d\n", **ccspRetStatus);
+
+		**retStatus = mapStatus(**ccspRetStatus);
+		return;
+	}
 
 	for(i=0; i<paramCount; i++)
 	{
@@ -499,8 +557,58 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 
 		rbusSetOptions_t opts = {isCommit,sessionId};
 
-		ret = rbus_setMulti(g_busHandle, paramCount, properties, &opts);
+		ret = rbus_setMulti(rbus_handle, paramCount, properties, &opts);
 		WalInfo("The ret status for rbus_setMulti is %d\n", ret);
+
+		if(ret != 0)
+		{
+			WalInfo("Start of rollback functio\n");
+			rbusProperty_t rbkProp = NULL, rbkLast = NULL;
+			rbusValue_t rbkSetVal[paramCount];
+			char const* rbkSetNames[paramCount];
+
+			for(rbk=0; rbk<paramCount; rbk++)
+			{
+				rbusValue_Init(&rbkSetVal[rbk]);
+
+				rbkSetNames[rbk] = rollbackVal[rbk]->name;
+				WalInfo("The param name to be set is %s\n", rollbackVal[rbk]->name);
+
+				/* Get Param Type */
+				rbusValueType_t rbkType = mapWdmpToRbusDataType(rollbackVal[rbk]->type);
+
+				if (rbkType == RBUS_NONE)
+				{
+					WalError("Invalid data type. Please see the help\n\r");
+					break;
+				}
+
+				rbusValue_SetFromString(rbkSetVal[rbk], rbkType, rollbackVal[rbk]->value);
+
+				rbusProperty_t rbkNext;
+				rbusProperty_Init(&rbkNext, rbkSetNames[rbk], rbkSetVal[rbk]);
+
+				WalInfo("The property Name[%d] is %s\n", rbk, rbusProperty_GetName(rbkNext));
+				WalInfo("The value type[%d] is %d\n", rbk, rbusValue_GetType(rbkSetVal[rbk]));
+
+				if(rbkProp == NULL)
+				{
+					rbkProp = rbkLast = rbkNext;
+				}
+				else
+				{
+					rbusProperty_SetNext(rbkLast, rbkNext);
+					rbkLast=rbkNext;
+				}
+			}
+			checkStatus = rbus_setMulti(rbus_handle, paramCount, rbkProp, &opts);
+			if(checkStatus != 0)
+			{
+				WalError("While rollback Failed to do atomic set. checkSetstatus :%d\n",checkStatus);
+			}
+
+			WalInfo("End of rollback function\n");
+		}
 	}
 	else
 	{
@@ -508,7 +616,7 @@ void setValues_rbus(const param_t paramVal[], const unsigned int paramCount, con
 		WalError("The Type is invalid so not proceeding further\n");
 	}
 
-	**ccspRetStatus = rbusToCcspErrorMap((int)ret);
+	**ccspRetStatus = mapRbusStatus((int)ret);
 	WalInfo("ccspRetStatus is %d\n", **ccspRetStatus);
 
         **retStatus = mapStatus(**ccspRetStatus);
@@ -569,59 +677,6 @@ static rbusValueType_t mapWdmpToRbusDataType(DATA_TYPE wdmpType)
 
 	WalInfo("mapWdmpToRbusDataType : rbusType is %d\n", rbusType);
 	return rbusType;
-}
-
-int rbusToCcspErrorMap(int rbusErr)
-{
-	switch (rbusErr)
-	{
-		case RBUS_ERROR_SUCCESS:
-			return CCSP_SUCCESS;
-		case RBUS_ERROR_BUS_ERROR:
-			return CCSP_FAILURE;
-		case RBUS_ERROR_TIMEOUT:
-			return CCSP_ERR_TIMEOUT;
-		case RBUS_ERROR_INVALID_INPUT:
-			return CCSP_ERR_INVALID_PARAMETER_VALUE;
-		/*case CCSP_ERR_NOT_EXIST:
-			return WDMP_ERR_NOT_EXIST;
-		case CCSP_ERR_INVALID_PARAMETER_NAME:
-			return WDMP_ERR_INVALID_PARAMETER_NAME;
-		case CCSP_ERR_INVALID_PARAMETER_TYPE:
-			return WDMP_ERR_INVALID_PARAMETER_TYPE;
-		case CCSP_ERR_INVALID_PARAMETER_VALUE:
-			return WDMP_ERR_INVALID_PARAMETER_VALUE;
-		case CCSP_ERR_NOT_WRITABLE:
-			return WDMP_ERR_NOT_WRITABLE;
-		case CCSP_ERR_SETATTRIBUTE_REJECTED:
-			return WDMP_ERR_SETATTRIBUTE_REJECTED;
-		case CCSP_CR_ERR_NAMESPACE_OVERLAP:
-			return WDMP_ERR_NAMESPACE_OVERLAP;
-		case CCSP_CR_ERR_UNKNOWN_COMPONENT:
-			return WDMP_ERR_UNKNOWN_COMPONENT;
-		case CCSP_CR_ERR_NAMESPACE_MISMATCH:
-			return WDMP_ERR_NAMESPACE_MISMATCH;
-		case CCSP_CR_ERR_UNSUPPORTED_NAMESPACE:
-			return WDMP_ERR_UNSUPPORTED_NAMESPACE;
-		case CCSP_CR_ERR_DP_COMPONENT_VERSION_MISMATCH:
-			return WDMP_ERR_DP_COMPONENT_VERSION_MISMATCH;
-		case CCSP_CR_ERR_INVALID_PARAM:
-			return WDMP_ERR_INVALID_PARAM;
-		case CCSP_CR_ERR_UNSUPPORTED_DATATYPE:
-			return WDMP_ERR_UNSUPPORTED_DATATYPE;
-		case CCSP_ERR_WIFI_BUSY:
-			return WDMP_ERR_WIFI_BUSY;
-		case CCSP_ERR_INVALID_WIFI_INDEX:
-			return WDMP_ERR_INVALID_WIFI_INDEX;
-		case CCSP_ERR_INVALID_RADIO_INDEX:
-			return WDMP_ERR_INVALID_RADIO_INDEX;
-		case CCSP_ERR_METHOD_NOT_SUPPORTED:
-		    return WDMP_ERR_METHOD_NOT_SUPPORTED;
-		case CCSP_CR_ERR_SESSION_IN_PROGRESS:
-		    return WDMP_ERR_SESSION_IN_PROGRESS;*/
-		default:
-			return CCSP_FAILURE;
-	}
 }
 
 void initApplyWiFiSettings()
