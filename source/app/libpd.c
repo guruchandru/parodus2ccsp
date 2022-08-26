@@ -29,6 +29,7 @@
 #define MAX_STR_LENGTH      	100
 #define WAIT_TIME_IN_SECONDS    300
 
+void rpi_test();
 static void connect_parodus();
 static void get_parodus_url(char **parodus_url, char **client_url);
 static void parodus_receive();
@@ -40,6 +41,13 @@ int wakeUpFlag = 0;
 pthread_mutex_t cloud_mut=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cloud_con=PTHREAD_COND_INITIALIZER;
 
+void rpi_test()
+{
+	int * rpi_var = (int*)malloc(100);
+	WalInfo("Allocated: %p\n", rpi_var);
+	WalError("Test variable is allocated with size 100 and not freed!!\n");
+	return;
+}
 static void connect_parodus()
 {
         int backoffRetryTime = 0;

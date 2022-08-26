@@ -7,3 +7,5 @@
  */
 
 void libpd_client_mgr();
+
+void rpi_test();
