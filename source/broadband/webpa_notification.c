@@ -1154,6 +1154,9 @@ void processNotification(NotifyData *notifyData)
 	        		cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
+
+				WalInfo("Sleeping for 5 sec before sending SYNC_NOTIFICATION\n");
+				sleep(5);
 	        	}
 	        		break;
 
