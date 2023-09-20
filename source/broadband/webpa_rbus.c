@@ -6,8 +6,14 @@
 #include <cimplog.h>
 #include "webpa_rbus.h"
 
+#define WIFI_NOTIFY_PARAM    "Device.WiFi.Notify"
+
 static rbusHandle_t rbus_handle;
 static bool isRbus = false;
+static int wifiNotifyReady = 0;
+
+void processWifiNotifyEvent(rbusHandle_t handle, rbusEvent_t const* event, rbusEventSubscription_t* subscription);
+void wifiSubscribeAsyncHandler( rbusHandle_t handle, rbusEventSubscription_t* subscription, rbusError_t error);
 
 bool isRbusEnabled()
 {
@@ -26,6 +32,16 @@ bool isRbusEnabled()
 bool isRbusInitialized()
 {
     return rbus_handle != NULL ? true : false;
+}
+
+int getWifiNotifyReady()
+{
+	return wifiNotifyReady;
+}
+
+void setWifiNotifyReady(int value)
+{
+	wifiNotifyReady = value;
 }
 
 WDMP_STATUS webpaRbusInit(const char *pComponentName)
@@ -124,3 +140,50 @@ rbusError_t clearTraceContext()
 		WalError("Rbus not initialized in clearTraceContext funcion\n");
         }
 }
+
+void wifiSubscribeAsyncHandler( rbusHandle_t handle, rbusEventSubscription_t* subscription, rbusError_t error)
+{
+	(void)handle;
+	WalInfo("wifiSubscribeAsyncHandler event %s, error %d - %s\n",subscription->eventName, error, rbusError_ToString(error));
+}
+
+void processWifiNotifyEvent(rbusHandle_t handle, rbusEvent_t const* event, rbusEventSubscription_t* subscription)
+{
+	(void)handle;
+	(void)subscription;
+
+	rbusValue_t incoming_value;
+
+	incoming_value = rbusObject_GetValue(event->data, "value");
+
+	WalInfo("Received processWifiNotifyEvent %s\n", event->name);
+
+	if(incoming_value)
+	{
+		int inVal = rbusValue_GetInt32(incoming_value);
+		WalInfo("set wifiNotifyReady value: %d\n", inVal);
+		setWifiNotifyReady(inVal);
+	}
+}
+
+void subscribeWifiRBUSevent()
+{
+	int rc = RBUS_ERROR_SUCCESS;
+	if(!isRbusInitialized())
+	{
+		WalError("rbus_handle is NULL\n ");
+		return;
+	}
+
+	rc = rbusEvent_SubscribeAsync(rbus_handle, WIFI_NOTIFY_PARAM, processWifiNotifyEvent, wifiSubscribeAsyncHandler, "webpa", 10*60);
+
+	if(rc != RBUS_ERROR_SUCCESS)
+	{
+		WalError("rbusEvent_Subscribe failed: %d, %s\n", rc, rbusError_ToString(rc));
+	}
+	else
+	{
+		WalInfo("rbusEvent_Subscribe was successful\n");
+	}
+}
+

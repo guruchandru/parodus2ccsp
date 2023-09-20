@@ -10,6 +10,7 @@
 
 #include "webpa_notification.h"
 #include "webpa_internal.h"
+#include "webpa_rbus.h"
 #ifdef RDKB_BUILD
 #include <sysevent/sysevent.h>
 #endif
@@ -36,6 +37,7 @@
 #define DEVICE_BOOT_TIME                "Device.DeviceInfo.X_RDKCENTRAL-COM_BootTime"
 #define FP_PARAM                  "Device.DeviceInfo.X_RDKCENTRAL-COM_DeviceFingerPrint.Enable"
 #define CLOUD_STATUS 				"cloud-status"
+#define WIFI_COMPONENT             "Device.WiFi."
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
 /*----------------------------------------------------------------------------*/
@@ -1111,6 +1113,34 @@ void sendNotificationForFirmwareUpgrade()
 }
 
 /*
+ * @brief To handle wifi notification for PARAM_NOTIFY
+ */
+void checkWifiNotification(char * paramName)
+{
+	if(paramName != NULL)
+	{
+		char * value = strstr(paramName, WIFI_COMPONENT);
+		if(value != NULL)
+		{
+			WalInfo("processing wifi notification, waiting for rbus ready event from wifi\n");
+			int sleep_val = 0;
+			while(!getWifiNotifyReady())
+			{
+				if(sleep_val > 5)
+				{
+					WalInfo("Waited for 5s, wifi notify ready event not received, proceed to send notification to cloud.\n");
+					break;
+				}
+				WalInfo("Sleeping for 1 sec before sending SYNC_NOTIFICATION\n");
+				sleep(1);
+				sleep_val++;
+			}
+			setWifiNotifyReady(0);
+		}
+	}
+}
+
+/*
  * @brief To handle notification for all notification types
  */
 void processNotification(NotifyData *notifyData)
@@ -1155,8 +1185,7 @@ void processNotification(NotifyData *notifyData)
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
 
-				WalInfo("Sleeping for 5 sec before sending SYNC_NOTIFICATION\n");
-				sleep(5);
+				checkWifiNotification((char*)(notifyData->u.notify->paramName));
 	        	}
 	        		break;
 

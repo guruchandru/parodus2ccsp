@@ -19,4 +19,8 @@ rbusError_t setTraceContext(char* traceContext[]);
 rbusError_t getTraceContext(char* traceContext[]);
 rbusError_t clearTraceContext();
 
+int getWifiNotifyReady();
+void setWifiNotifyReady(int value);
+void subscribeWifiRBUSevent();
+
 #endif

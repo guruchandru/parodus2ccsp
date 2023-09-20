@@ -61,6 +61,7 @@ int main()
 	        webpaRbusInit(pComponentName);
         }
 	ret = waitForOperationalReadyCondition();
+	subscribeWifiRBUSevent();
 	libpd_client_mgr();
 	WalInfo("Syncing backend manager with DB....\n");
 	CosaWebpaSyncDB();
