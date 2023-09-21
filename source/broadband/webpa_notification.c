@@ -72,7 +72,7 @@ const char * notifyparameters[]={
 "Device.Bridging.Bridge.1.Port.8.Enable",
 "Device.Bridging.Bridge.2.Port.2.Enable",
 "Device.DeviceInfo.X_COMCAST_COM_xfinitywifiEnable",
-"Device.WiFi.AccessPoint.10001.Security.ModeEnabled",
+/*"Device.WiFi.AccessPoint.10001.Security.ModeEnabled",
 "Device.WiFi.AccessPoint.10001.Security.X_COMCAST-COM_KeyPassphrase",
 "Device.WiFi.AccessPoint.10001.SSIDAdvertisementEnabled",
 "Device.WiFi.AccessPoint.10001.X_CISCO_COM_MACFilter.Enable",
@@ -99,7 +99,7 @@ const char * notifyparameters[]={
 "Device.WiFi.SSID.10002.Enable",
 "Device.WiFi.SSID.10002.SSID",
 "Device.WiFi.SSID.10102.Enable",
-"Device.WiFi.SSID.10102.SSID",
+"Device.WiFi.SSID.10102.SSID",*/
 "Device.X_CISCO_COM_DeviceControl.LanManagementEntry.1.LanMode",
 "Device.X_CISCO_COM_Security.Firewall.FilterAnonymousInternetRequests",
 "Device.X_CISCO_COM_Security.Firewall.FilterHTTP",
@@ -138,7 +138,7 @@ const char * notifyparameters[]={
 "Device.MoCA.Interface.1.Enable",
 #endif
 "Device.NotifyComponent.X_RDKCENTRAL-COM_PresenceNotification",
-"Device.WiFi.X_CISCO_COM_FactoryResetRadioAndAp",
+/*"Device.WiFi.X_CISCO_COM_FactoryResetRadioAndAp",
 "Device.WiFi.SSID.10003.SSID",
 "Device.WiFi.SSID.10103.SSID",
 "Device.WiFi.SSID.10005.SSID",
@@ -162,15 +162,15 @@ const char * notifyparameters[]={
 "Device.WiFi.AccessPoint.10003.Security.ModeEnabled",
 "Device.WiFi.AccessPoint.10103.Security.ModeEnabled",
 "Device.WiFi.AccessPoint.10005.Security.ModeEnabled",
-"Device.WiFi.AccessPoint.10105.Security.ModeEnabled",
+"Device.WiFi.AccessPoint.10105.Security.ModeEnabled",*/
 "Device.X_COMCAST-COM_GRE.Tunnel.1.PrimaryRemoteEndpoint",
 "Device.X_COMCAST-COM_GRE.Tunnel.1.SecondaryRemoteEndpoint",
-"Device.WiFi.Radio.10000.Channel",
+/*"Device.WiFi.Radio.10000.Channel",
 "Device.WiFi.Radio.10100.Channel",
 "Device.WiFi.Radio.10000.OperatingFrequencyBand",
 "Device.WiFi.Radio.10100.OperatingFrequencyBand",
 "Device.WiFi.Radio.10000.OperatingChannelBandwidth",
-"Device.WiFi.Radio.10100.OperatingChannelBandwidth",
+"Device.WiFi.Radio.10100.OperatingChannelBandwidth",*/
 "Device.X_COMCAST-COM_GRE.Tunnel.1.Interface.1.VLANID",
 "Device.X_COMCAST-COM_GRE.Tunnel.1.Interface.1.LocalInterfaces",
 "Device.X_COMCAST-COM_GRE.Tunnel.1.Interface.2.VLANID",
@@ -181,7 +181,7 @@ const char * notifyparameters[]={
 "Device.UserInterface.X_CISCO_COM_RemoteAccess.HttpEnable",
 "Device.UserInterface.X_CISCO_COM_RemoteAccess.HttpsEnable",
 #endif
-#ifdef FEATURE_SUPPORT_6G_RADIO
+/*#ifdef FEATURE_SUPPORT_6G_RADIO
 "Device.WiFi.AccessPoint.10201.Security.ModeEnabled",
 "Device.WiFi.AccessPoint.10201.Security.X_COMCAST-COM_KeyPassphrase",
 "Device.WiFi.AccessPoint.10201.SSIDAdvertisementEnabled",
@@ -211,7 +211,7 @@ const char * notifyparameters[]={
 "Device.WiFi.Radio.10200.Channel",
 "Device.WiFi.Radio.10200.OperatingFrequencyBand",
 "Device.WiFi.Radio.10200.OperatingChannelBandwidth",
-#endif
+#endif*/
 /* Always keep AdvancedSecurity parameters as the last parameters in notify list as these have to be removed if cujo/fp is not enabled. */
 "Device.DeviceInfo.X_RDKCENTRAL-COM_AdvancedSecurity.SafeBrowsing.Enable",
 "Device.DeviceInfo.X_RDKCENTRAL-COM_AdvancedSecurity.Softflowd.Enable"
@@ -1113,34 +1113,6 @@ void sendNotificationForFirmwareUpgrade()
 }
 
 /*
- * @brief To handle wifi notification for PARAM_NOTIFY
- */
-void checkWifiNotification(char * paramName)
-{
-	if(paramName != NULL)
-	{
-		char * value = strstr(paramName, WIFI_COMPONENT);
-		if(value != NULL)
-		{
-			WalInfo("processing wifi notification, waiting for rbus ready event from wifi\n");
-			int sleep_val = 0;
-			while(!getWifiNotifyReady())
-			{
-				if(sleep_val > 5)
-				{
-					WalInfo("Waited for 5s, wifi notify ready event not received, proceed to send notification to cloud.\n");
-					break;
-				}
-				WalInfo("Sleeping for 1 sec before sending SYNC_NOTIFICATION\n");
-				sleep(1);
-				sleep_val++;
-			}
-			setWifiNotifyReady(0);
-		}
-	}
-}
-
-/*
  * @brief To handle notification for all notification types
  */
 void processNotification(NotifyData *notifyData)
@@ -1185,7 +1157,6 @@ void processNotification(NotifyData *notifyData)
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
 
-				checkWifiNotification((char*)(notifyData->u.notify->paramName));
 	        	}
 	        		break;
 
@@ -1335,6 +1306,39 @@ void processNotification(NotifyData *notifyData)
 	    free(dest);
         }
 		cJSON_Delete(notifyPayload);
+}
+
+/*
+ * @brief To trigger process notification for wifi parameters
+ */
+void triggerWifiProcessNotification()
+{
+	WalInfo("triggerWifiProcessNotification\n");
+	NotifyData *notifyData = (NotifyData *)malloc(sizeof(NotifyData));
+
+	if(notifyData != NULL)
+	{
+		memset(notifyData,0,sizeof(NotifyData));
+		notifyData->type = PARAM_NOTIFY;
+
+		ParamNotify *paramNotify;
+		paramNotify= (ParamNotify *) malloc(sizeof(ParamNotify));
+
+		if(paramNotify != NULL)
+		{
+			memset(paramNotify, 0, sizeof(paramNotify));
+			paramNotify->paramName = WIFI_COMPONENT;
+			paramNotify->type = 2;
+			paramNotify->changeSource = CHANGED_BY_UNKNOWN;
+
+			notifyData->u.notify = paramNotify;
+
+		}
+
+		processNotification(notifyData);
+	}
+
+
 }
 
 /*

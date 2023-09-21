@@ -161,8 +161,12 @@ void processWifiNotifyEvent(rbusHandle_t handle, rbusEvent_t const* event, rbusE
 	if(incoming_value)
 	{
 		int inVal = rbusValue_GetInt32(incoming_value);
-		WalInfo("set wifiNotifyReady value: %d\n", inVal);
-		setWifiNotifyReady(inVal);
+		if(inVal == 1)
+		{
+			WalInfo("set wifiNotifyReady value: %d\n", inVal);
+			setWifiNotifyReady(inVal);
+			triggerWifiProcessNotification();
+		}
 	}
 }
 
