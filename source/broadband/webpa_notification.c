@@ -1117,8 +1117,11 @@ void sendNotificationForFirmwareUpgrade()
  */
 void checkWifiNotification(char * paramName)
 {
+	WalInfo("Inside checkWifiNotification\n");
 	if(paramName != NULL)
 	{
+		WalInfo("Inside paramName\n");
+		WalInfo("paramName is %s\n", paramName);
 		char * value = strstr(paramName, WIFI_COMPONENT);
 		if(value != NULL)
 		{
@@ -1176,16 +1179,19 @@ void processNotification(NotifyData *notifyData)
 
 	        		ret = processParamNotification(notifyData->u.notify, &cmc, &cid);
 
+				WalInfo("After processParamNotification ret is %d\n", ret);
 	        		if (ret != WDMP_SUCCESS)
 	        		{
 	        			free(dest);
 	        			return;
 	        		}
+				WalInfo("After ret check\n");
 	        		cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
-
+				WalInfo("Before checkWifiNotification");
 				checkWifiNotification((char*)(notifyData->u.notify->paramName));
+				WalInfo("After checkWifiNotification");
 	        	}
 	        		break;
 
