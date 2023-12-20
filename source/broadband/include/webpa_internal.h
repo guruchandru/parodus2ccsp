@@ -46,11 +46,13 @@
 #define WAL_COMPONENT_INIT_RETRY_INTERVAL       10
 #define WEBPA_RETRY_MIN_COUNT                   1
 #define WEBPA_RETRY_MAX_COUNT                   4
+#define WEBPA_SYSTEM_READY_SLEEP                5
 #else
 #define WAL_COMPONENT_INIT_RETRY_COUNT          1
 #define WAL_COMPONENT_INIT_RETRY_INTERVAL       1
 #define WEBPA_RETRY_MIN_COUNT                   1
 #define WEBPA_RETRY_MAX_COUNT                   1
+#define WEBPA_SYSTEM_READY_SLEEP                1
 #endif
 
 #define CCSP_ERR_WIFI_BUSY			503
