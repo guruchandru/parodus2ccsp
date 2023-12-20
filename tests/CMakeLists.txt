@@ -93,6 +93,14 @@ add_executable(test_webpa_replace test_webpa_replace.c mock_stack.c mock_cache.c
 target_link_libraries (test_webpa_replace -lwrp-c -ldbus-1 -lccsp_common -lwdmp-c -lcjson ${WEBPA_COMMON_LIBS} -llibparodus)
 target_link_libraries (test_webpa_replace gcov -Wl,--no-as-needed )
 
+#-------------------------------------------------------------------------------
+#   test_webpa_internal
+#-------------------------------------------------------------------------------
+add_test(NAME test_webpa_internal COMMAND ${MEMORY_CHECK} ./test_webpa_internal)
+add_executable(test_webpa_internal test_webpa_internal.c ../source/broadband/webpa_rbus.c ../source/broadband/webpa_parameter.c ../source/broadband/webpa_adapter.c ../source/app/libpd.c ../source/app/privilege.c ../source/broadband/webpa_internal.c ../source/broadband/webpa_notification.c)
+target_link_libraries (test_webpa_internal ${WEBPA_COMMON_LIBS} -llibparodus -lwdmp-c -lrbus -ldbus-1 -lccsp_common)
+target_link_libraries (test_webpa_internal gcov -Wl,--no-as-needed )
+
 # Code coverage
 
 add_custom_target(coverage
@@ -114,6 +122,8 @@ COMMAND lcov -q --capture --directory
 ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/test_webpa_replace.dir/__/src --output-file test_webpa_replace.info
 COMMAND lcov -q --capture --directory 
 ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/test_webpa_notification.dir/__/src --output-file test_webpa_notification.info
+COMMAND lcov -q --capture --directory
+${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/test_webpa_internal.dir/__/src --output-file test_webpa_internal.info
 
 COMMAND lcov
 -a test_libpd.info
@@ -125,6 +135,7 @@ COMMAND lcov
 -a test_webpa_set_attr.info
 -a test_webpa_replace.info
 -a test_webpa_notification.info
+-a test_webpa_internal.info
 --output-file coverage.info
 
 COMMAND genhtml coverage.info

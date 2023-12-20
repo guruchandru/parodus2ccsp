@@ -1359,7 +1359,7 @@ static void retryFailedComponentCaching()
 					}
 				}
 				free_componentStruct_t(bus_handle, size, ppComponents);
-			}while((retryCount > 1) && (retryCount <= 4));
+			}while((retryCount > WEBPA_RETRY_MIN_COUNT) && (retryCount <= WEBPA_RETRY_MAX_COUNT));
 		}
 
 		for(i = 0; i < count1 ; i++)
@@ -1407,7 +1407,7 @@ static void retryFailedComponentCaching()
 				}
 				free_componentStruct_t(bus_handle, size, ppComponents);
 
-			}while((retryCount > 1) && (retryCount <= 4));
+			}while((retryCount > WEBPA_RETRY_MIN_COUNT) && (retryCount <= WEBPA_RETRY_MAX_COUNT));
 		}
 
 		compCacheSuccessCnt = cnt;
