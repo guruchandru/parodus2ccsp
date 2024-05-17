@@ -1145,6 +1145,21 @@ void processNotification(NotifyData *notifyData)
 	        	{
 	        		strcpy(dest, "event:SYNC_NOTIFICATION");
 
+					if(strcmp(notifyData->u.notify->paramName, "Device.DeviceInfo.X_COMCAST-COM_WAN_IP") == 0 || strcmp(notifyData->u.notify->paramName, "Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6") == 0)
+					{
+						FILE *fp = fopen("/tmp/webpanotifyready", "rb");
+						if(fp == NULL)
+						{
+							free(dest);
+							WalInfo("Webpa is not ready to sent %s notification to Parodus as cloud connection is not OK\n", notifyData->u.notify->paramName);
+							return;
+						}
+						else
+						{
+							fclose(fp);
+							WalInfo("Webpa is ready to sent %s notification to Parodus\n", notifyData->u.notify->paramName);
+						}
+					}
 	        		ret = processParamNotification(notifyData->u.notify, &cmc, &cid);
 
 	        		if (ret != WDMP_SUCCESS)
