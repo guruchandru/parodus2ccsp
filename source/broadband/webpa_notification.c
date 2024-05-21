@@ -884,12 +884,15 @@ static void addNotifyMsgToQueue(NotifyData *notifyData)
 	if(message)
 	{
 		message->notifyData = notifyData;
+        WalInfo("addNotifyMsgToQueue printing notifyData->u.notify->paramName is %s\n", notifyData->u.notify->paramName);
 		message->next = NULL;
 		pthread_mutex_lock (&mut);
+        WalInfo("addNotifyMsgToQueue printing message->notifyData->u.notify->paramName is %s\n", message->notifyData->u.notify->paramName);
 		WalPrint("addNotifyMsgToQueue :mutex lock in producer thread\n");
 		if(notifyMsgQ == NULL)
 		{
 			notifyMsgQ = message;
+            WalInfo("addNotifyMsgToQueue printing notifyMsgQ->notifyData->u.notify->paramName is %s\n", notifyMsgQ->notifyData->u.notify->paramName);
 			WalPrint("addNotifyMsgToQueue : Producer added message\n");
 		 	pthread_cond_signal(&con);
 			pthread_mutex_unlock (&mut);
@@ -927,10 +930,13 @@ static void handleNotificationEvents()
 		if(notifyMsgQ != NULL)
 		{
 			NotifyMsg *message = notifyMsgQ;
+            WalInfo("handleNotificationEvents printing message->notifyData->u.notify->paramName is %s\n", message->notifyData->u.notify->paramName);
+            WalInfo("handleNotificationEvents printing notifyMsgQ->notifyData->u.notify->paramName is %s\n", notifyMsgQ->notifyData->u.notify->paramName);
 			notifyMsgQ = notifyMsgQ->next;
 			pthread_mutex_unlock (&mut);
 			WalPrint("handleNotificationEvents : mutex unlock in consumer thread\n");
 			NotifyData *notifyData = message->notifyData;
+            WalInfo("handleNotificationEvents printing notifyData->u.notify->paramName is %s\n", notifyData->u.notify->paramName);
 			processNotification(notifyData);
 			WAL_FREE(message);
 		}
@@ -1144,7 +1150,11 @@ void processNotification(NotifyData *notifyData)
 	        	case PARAM_NOTIFY:
 	        	{
 	        		strcpy(dest, "event:SYNC_NOTIFICATION");
-
+                    WalInfo("B4 notifyData->u.notify->paramName print\n");
+                    if(notifyData->u.notify->paramName != NULL)
+                    {
+                        WalInfo("notifyData->u.notify->paramName value is %s\n", notifyData->u.notify->paramName);
+                    }
 					if(strcmp(notifyData->u.notify->paramName, "Device.DeviceInfo.X_COMCAST-COM_WAN_IP") == 0 || strcmp(notifyData->u.notify->paramName, "Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6") == 0)
 					{
 						FILE *fp = fopen("/tmp/webpanotifyready", "rb");
