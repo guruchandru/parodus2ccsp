@@ -85,10 +85,18 @@ void processRequest(char *reqPayload,char *transactionId, char **resPayload, hea
                                 resObj->retStatus = (WDMP_STATUS *) malloc(sizeof(WDMP_STATUS)*resObj->paramCnt);
                                 resObj->timeSpan = NULL;
                                 paramCount = (int)reqObj->u.getReq->paramCnt;
-                                
+
+                                resObj->u.paramRes = (param_res_t *) malloc(sizeof(param_res_t));
+                                memset(resObj->u.paramRes, 0, sizeof(param_res_t));
+
+                                resObj->u.paramRes->params = (param_t *) malloc(sizeof(param_t)*paramCount);
+                                memset(resObj->u.paramRes->params, 0, sizeof(param_t)*paramCount);
+
                                 for (i = 0; i < paramCount; i++) 
                                 {
                                         WalPrint("Request:> paramNames[%d] = %s\n",i,reqObj->u.getReq->paramNames[i]);
+                                        WalPrint("Request:> paramsNames[%d].value = %s\n",i,resObj->u.paramRes->params[i].value);
+                                        WalPrint("Request:> paramsNames[%d].type = %d\n",i,resObj->u.paramRes->params[i].type);
                                         param = reqObj->u.getReq->paramNames[i];
 					if(param == NULL)
 					{
