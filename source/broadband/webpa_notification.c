@@ -1127,6 +1127,8 @@ void processNotification(NotifyData *notifyData)
 	unsigned int cmc;
 	char *strBootTime = NULL;
 	char *reason = NULL;
+	NOTIFY_TYPE tempType = 0;
+
 
 	snprintf(device_id, sizeof(device_id), "mac:%s", deviceMAC);
 	WalPrint("Device_id %s\n", device_id);
@@ -1163,6 +1165,7 @@ void processNotification(NotifyData *notifyData)
 
 	        	case FACTORY_RESET:
 	        	{
+					tempType = FACTORY_RESET;
 	        		WalPrint("----- Inside FACTORY_RESET type -----\n");
 
 	        		strcpy(dest, "event:SYNC_NOTIFICATION");
@@ -1307,6 +1310,34 @@ void processNotification(NotifyData *notifyData)
 	    free(dest);
         }
 		cJSON_Delete(notifyPayload);
+
+	if( tempType == FACTORY_RESET )
+	{
+		WalInfo("Triggering Device.DeviceInfo.X_COMCAST-COM_WAN_IP notification\n");
+		NotifyData *wanIpNotifyData = (NotifyData *)malloc(sizeof(NotifyData));
+		memset(wanIpNotifyData,0,sizeof(NotifyData));
+		wanIpNotifyData->type = PARAM_NOTIFY;
+
+		ParamNotify *wanIpParamNotify = (ParamNotify *)malloc(sizeof(ParamNotify));
+		memset(wanIpParamNotify,0,sizeof(ParamNotify));
+		wanIpParamNotify->changeSource = CHANGED_BY_UNKNOWN;
+		wanIpNotifyData->u.notify = wanIpParamNotify;
+
+		processNotification(wanIpNotifyData);
+
+		WalInfo("Triggering Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6 notification\n");
+		NotifyData *wanIpv6NotifyData = (NotifyData *)malloc(sizeof(NotifyData));
+		memset(wanIpv6NotifyData,0,sizeof(NotifyData));
+		wanIpv6NotifyData->type = PARAM_NOTIFY;
+	
+		ParamNotify *wanIpv6ParamNotify = (ParamNotify *)malloc(sizeof(ParamNotify));
+		memset(wanIpv6ParamNotify,0,sizeof(ParamNotify));
+		wanIpv6ParamNotify->changeSource = CHANGED_BY_UNKNOWN;
+		wanIpv6NotifyData->u.notify = wanIpv6ParamNotify;
+
+		processNotification(wanIpv6NotifyData);
+		tempType = 0;
+	}
 }
 
 /*
